@@ -6,7 +6,6 @@ from permafrost import FrozenList, PathError, delete_in, freeze, hash_of, merge,
 
 from .models import Device, Interface, Site
 
-
 # Paths inside a value
 
 

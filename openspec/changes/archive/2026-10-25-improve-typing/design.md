@@ -41,10 +41,10 @@ See `proposal.md` for the motivation and `specs/static-typing/spec.md` for the r
 ### Public type aliases
 
 ```python
-type Scalar = str | int | float | bool | bytes | date | datetime | None   # codec.py
-type Step = Scalar | tuple[Scalar, ...]                                   # ops.py
-type Path = Sequence[Step]                                                # ops.py
-type Loader[V] = Callable[[str, str], Awaitable[V]]                       # store.py
+type Scalar = str | int | float | bool | bytes | date | datetime | None  # codec.py
+type Step = Scalar | tuple[Scalar, ...]  # ops.py
+type Path = Sequence[Step]  # ops.py
+type Loader[V] = Callable[[str, str], Awaitable[V]]  # store.py
 ```
 
 All four are exported from `permafrost`. A tuple is a step because a dictionary key can be a tuple, which freezes to a `FrozenTuple` that compares and hashes like the tuple.

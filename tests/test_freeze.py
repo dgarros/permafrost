@@ -150,7 +150,7 @@ def test_frozen_input_is_returned_as_is():
 
 def test_store_an_object_with_a_registered_handler():
     class Point:
-        __slots__ = ("x", "y", "__weakref__")
+        __slots__ = ("__weakref__", "x", "y")
 
         def __init__(self, x, y):
             object.__setattr__(self, "x", x)

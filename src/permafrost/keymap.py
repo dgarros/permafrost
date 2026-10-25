@@ -80,7 +80,7 @@ def get(root: KMBranch, key: str) -> bytes | None:
         depth += 1
 
 
-def set(root: KMBranch, key: str, value_hash: bytes) -> KMBranch:  # noqa: A001
+def set(root: KMBranch, key: str, value_hash: bytes) -> KMBranch:
     """Return a key map with ``key`` set to ``value_hash``."""
     result = _set(root, key, key_hash(key), value_hash, 0)
     assert type(result) is KMBranch

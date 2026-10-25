@@ -170,7 +170,7 @@ async def test_model_class_that_cannot_be_imported_is_a_cache_miss(setup, collec
     class Local(FrozenModel):
         name: str
 
-    backend, store = setup
+    _backend, store = setup
     calls = []
 
     async def loader(d, k):
@@ -190,7 +190,7 @@ async def test_model_class_that_cannot_be_imported_is_a_cache_miss(setup, collec
 
 
 async def test_scalar_value_root_in_the_external_cache(setup, collect):
-    backend, store = setup
+    _backend, store = setup
     await store.set("main", "n", 12345)
     _forget(store, collect)
     assert await store.get("main", "n") == 12345

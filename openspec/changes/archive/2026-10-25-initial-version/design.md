@@ -117,8 +117,11 @@ store.cleanup()
 task = store.start_cleanup(interval=60)
 
 frozen = freeze(value)
-set_in(frozen, ("a", "b"), 2); delete_in(frozen, ("a",)); merge(frozen, partial, lists="replace")
-diff(a, b); hash_of(a)
+set_in(frozen, ("a", "b"), 2)
+delete_in(frozen, ("a",))
+merge(frozen, partial, lists="replace")
+diff(a, b)
+hash_of(a)
 ```
 
 - Writes are `async` because they write to the external cache.
