@@ -1,6 +1,6 @@
 # Examples
 
-Each example is a script that prints what it does. Run an example from the repository root with `uv run python examples/<name>.py`. `tests/test_examples.py` runs every example.
+Each example is a script that prints what it does. Run an example from the repository root with `uv run python examples/<name>.py`. `tests/unit/test_examples.py` runs every example.
 
 ## `nested_values.py`
 
@@ -30,7 +30,7 @@ Starts two processes that share dimensions through Redis. Each process has its o
 2. Process B reads `main` and `branch-a` from Redis, compares them, creates `branch-b` from `branch-a`, changes, adds and deletes devices, and sends the name `branch-b` to process A.
 3. Process A reads `branch-b` from Redis and compares it with `branch-a`.
 
-This example requires a Redis server. It uses `redis://localhost:6379/0` unless `REDIS_URL` is set, and `tests/test_examples.py` skips it when `REDIS_URL` is not set. For example, with Docker:
+This example requires a Redis server. It uses `redis://localhost:6379/0` unless `REDIS_URL` is set, and `tests/unit/test_examples.py` skips it when `REDIS_URL` is not set. For example, with Docker:
 
 ```shell
 docker run -d --rm --name permafrost-redis -p 6379:6379 redis:7-alpine

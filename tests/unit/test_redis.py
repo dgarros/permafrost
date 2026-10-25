@@ -1,9 +1,7 @@
-"""Redis backend, with fakeredis and, when REDIS_URL is set, a real Redis server."""
+"""Redis backend unit tests using fakeredis."""
 
-import os
 import subprocess
 import sys
-import uuid
 
 import fakeredis
 import pytest
@@ -76,24 +74,6 @@ async def test_client_that_returns_strings():
     with pytest.raises(TypeError, match="decode_responses=False"):
         await backend.get_root("main")
     await client.aclose()
-
-
-@pytest.mark.redis
-@pytest.mark.skipif(not os.environ.get("REDIS_URL"), reason="REDIS_URL is not set")
-async def test_real_redis_server(collect):
-    backend = RedisBackend.from_url(os.environ["REDIS_URL"], prefix=f"permafrost-test-{uuid.uuid4().hex}:")
-    try:
-        store = Store(backend)
-        await store.create_dimension("main")
-        await store.set("main", "k", {"real-redis": [1, {"x": 2}]})
-        _forget(store, collect)
-        assert await store.get("main", "k") == {"real-redis": [1, {"x": 2}]}
-        assert await Store(backend).keys("main") == ["k"]
-    finally:
-        keys = await backend.client.keys(f"{backend.prefix}*")
-        if keys:
-            await backend.client.delete(*keys)
-        await backend.client.aclose()
 
 
 def test_import_without_the_redis_package():

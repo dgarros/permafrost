@@ -7,7 +7,7 @@ from permafrost import DiffEntry, diff, equal, freeze, set_in
 # permafrost.diff is the function, so get the module from importlib.
 diff_module = importlib.import_module("permafrost.diff")
 
-from .models import Device, Interface
+from ..models import Device, Interface
 
 
 def test_two_equal_values_built_separately():

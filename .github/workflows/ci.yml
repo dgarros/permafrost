@@ -31,4 +31,6 @@ jobs:
       - name: Check types
         run: uv run --locked ty check
       - name: Run unit tests
-        run: uv run --locked pytest
+        run: uv run --locked pytest tests/unit
+      - name: Run Redis integration tests
+        run: uv run --locked pytest tests/integration

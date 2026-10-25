@@ -1,7 +1,7 @@
 """Scenarios of specs/static-typing/spec.md.
 
 The type checker checks each ``assert_type`` against the declared types, and
-``tests/test_type_check.py`` fails when it reports an error. A line that
+``tests/unit/test_type_check.py`` fails when it reports an error. A line that
 expects a type error carries ``# ty: ignore[<rule>]``; the type check reports
 an ignore comment that is not needed, so each such line keeps checking that
 the error is still reported. At run time ``assert_type`` returns its argument,
@@ -32,7 +32,7 @@ from permafrost import (
     set_in,
 )
 
-from .models import Device, Interface, Site
+from ..models import Device, Interface, Site
 
 
 class Prefix:

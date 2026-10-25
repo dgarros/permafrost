@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-README = Path(__file__).parent.parent / "README.md"
+README = Path(__file__).parents[2] / "README.md"
 BLOCKS = re.findall(r"```python\n(.*?)```", README.read_text(), re.DOTALL)
 
 

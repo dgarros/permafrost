@@ -27,13 +27,14 @@ dev = [
     "pytest>=8.4.2",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.17.2",
+    "testcontainers[redis]>=4.15.0",
     "ty>=0.0.91",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = ["redis: tests that need a real Redis server (set REDIS_URL)"]
+markers = ["redis: integration tests using a Testcontainers-managed Redis server (requires Docker)"]
 
 [tool.ruff]
 line-length = 120

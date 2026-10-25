@@ -4,6 +4,26 @@ Permafrost is a Python library that stores deeply nested, read-only data across 
 
 Requires Python 3.12 or later. Install the `redis` extra to use the Redis backend.
 
+## Development and tests
+
+Install the development dependencies with `uv sync --locked`. The full suite requires a
+running Docker daemon accessible to the current user. Testcontainers pulls
+`redis:7.4.2-alpine`, waits for Redis to respond, and manages one container per pytest
+session. It uses a dynamically mapped port and removes the container on teardown.
+The integration tests create isolated key prefixes and do not need `REDIS_URL`.
+Docker must be able to pull the Redis image and Testcontainers' cleanup helper image.
+
+Run the full suite with `uv run pytest`, only Redis integration tests with
+`uv run pytest tests/integration`, or unit tests without Docker with `uv run pytest tests/unit`.
+CI runs these directories in separate steps, with integration tests running only
+after unit tests pass.
+Redis integration tests fail if Docker or container startup is unavailable; they
+are not silently skipped. The standalone Redis example still uses `REDIS_URL`,
+and its example test is skipped when that variable is unset.
+
+Run the type checker with `uv run ty check`, lint with `uv run ruff check`, and
+check formatting with `uv run ruff format --check`.
+
 ## Read-only values
 
 `freeze()` returns the read-only form of a value. Dictionaries, lists, tuples and sets become `FrozenDict`, `FrozenList`, `FrozenTuple` and `FrozenSet`. They support the same read operations as the built-in types and compare equal to built-in values with the same content. Every operation that would change them raises an error.
