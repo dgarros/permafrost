@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from permafrost import FrozenDict, FrozenList, FrozenSet, FrozenTuple, ReadOnlyError, freeze
 
-from .models import Device, Site
+from ..models import Device, Site
 
 
 def test_dict_cannot_change():

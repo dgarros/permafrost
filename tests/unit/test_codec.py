@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime
 from permafrost import codec, freeze, hash_of, registry
 from permafrost.types import build, encode_node, walk
 
-from .models import Device, Interface, Site
+from ..models import Device, Interface, Site
 
 
 def test_dict_order_does_not_change_encoding():

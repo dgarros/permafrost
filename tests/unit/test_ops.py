@@ -4,7 +4,7 @@ import pytest
 
 from permafrost import FrozenList, PathError, delete_in, freeze, hash_of, merge, set_in
 
-from .models import Device, Interface, Site
+from ..models import Device, Interface, Site
 
 # Paths inside a value
 

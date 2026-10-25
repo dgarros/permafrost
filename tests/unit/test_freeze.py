@@ -17,8 +17,8 @@ from permafrost import (
     registry,
 )
 
-from . import models
-from .models import Device, Interface, Site
+from .. import models
+from ..models import Device, Interface, Site
 
 
 def test_store_a_nested_value():

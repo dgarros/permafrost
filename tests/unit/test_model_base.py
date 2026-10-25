@@ -4,7 +4,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 from pydantic import ValidationError
 
-from .models import Device, Interface
+from ..models import Device, Interface
 
 
 def test_pydantic_dataclass_with_base_class():

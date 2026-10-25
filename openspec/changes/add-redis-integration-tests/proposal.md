@@ -10,6 +10,7 @@ Redis behavior is mostly tested with fakeredis, and the one real-server test req
 - Let pytest start and stop a Redis container, discover its mapped endpoint, and provide isolated asynchronous backend clients to integration tests.
 - Replace the environment-gated Redis smoke test with a dedicated integration suite covering backend commands, TTLs, cold reads, dimension sharing and reload, and missing-node recovery.
 - Retain fakeredis unit tests and a way to run them without Docker; document both test selections and Docker prerequisites.
+- Organize unit tests under `tests/unit` and integration tests under `tests/integration`; run each directory in a separate CI step, with integration tests gated on unit-test success.
 
 ## Capabilities
 
@@ -23,4 +24,4 @@ None. Existing requirements in `external-cache`, `dimension-sharing`, `value-loa
 
 ## Impact
 
-Affected files include `pyproject.toml`, `uv.lock`, `tests/test_redis.py`, a new `tests/integration/` suite and fixtures, and test instructions in `README.md`. Running the Redis integration selection requires a reachable Docker daemon and permission to pull the selected Redis image. Redis and Testcontainers remain outside the base runtime dependencies. No public API changes or CI workflow additions are planned; this repository has no existing CI workflow.
+Affected files include `pyproject.toml`, `uv.lock`, `tests/unit/`, the `tests/integration/` suite and fixtures, test instructions in `README.md`, and the existing `.github/workflows/ci.yml`. Running the Redis integration selection requires a reachable Docker daemon and permission to pull the selected Redis image. Redis and Testcontainers remain outside the base runtime dependencies. No public API changes are planned.

@@ -5,8 +5,8 @@ import fakeredis
 from permafrost import DiffEntry, KeyChange, Store, hash_of, merge, set_in
 from permafrost.backends.redis import RedisBackend
 
-from .models import Device, Interface
-from .process import Process
+from ..models import Device, Interface
+from ..process import Process
 
 
 class Clock:

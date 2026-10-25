@@ -16,7 +16,7 @@ EXAMPLES = [
             path.stem in NEEDS_REDIS and not os.environ.get("REDIS_URL"), reason="REDIS_URL is not set"
         ),
     )
-    for path in sorted((Path(__file__).parent.parent / "examples").glob("*.py"))
+    for path in sorted((Path(__file__).parents[2] / "examples").glob("*.py"))
 ]
 
 

@@ -2,7 +2,7 @@
 
 ## Context
 
-See `proposal.md` for motivation. `tests/test_redis.py` currently mixes fakeredis unit tests with one `REDIS_URL` smoke test. `tests/process.py` provides isolated registries for simulating independent processes, preventing reads from accidentally succeeding through globally shared in-memory nodes. Pytest uses automatic asyncio mode and runs ty across the tests as well as the library.
+See `proposal.md` for motivation. The original Redis tests mixed fakeredis unit tests with one `REDIS_URL` smoke test. `tests/process.py` provides isolated registries for simulating independent processes, preventing reads from accidentally succeeding through globally shared in-memory nodes. Pytest uses automatic asyncio mode and runs ty across the tests as well as the library.
 
 ## Goals / Non-Goals
 
@@ -12,11 +12,13 @@ See `proposal.md` for motivation. `tests/test_redis.py` currently mixes fakeredi
 
 ## Decisions
 
-### Separate integration tests with the existing Redis marker
+### Separate test directories
 
-Add `tests/integration/test_redis.py` and fixtures scoped to that directory. Mark the module `redis`, updating the existing marker description. `uv run pytest` includes integration tests and requires Docker; `uv run pytest -m 'not redis'` runs the existing suite without creating a container. `uv run pytest -m redis` explicitly runs the integration suite. An unavailable Docker daemon or failed startup fails the selected integration tests with an actionable error; do not silently skip them or convert arbitrary startup exceptions into skips.
+Add `tests/integration/test_redis.py` and fixtures scoped to that directory. Mark the module `redis`, updating the existing marker description. `uv run pytest` includes integration tests and requires Docker; `uv run pytest tests/unit` runs the existing suite without creating a container. `uv run pytest tests/integration` explicitly runs the integration suite. An unavailable Docker daemon or failed startup fails the selected integration tests with an actionable error; do not silently skip them or convert arbitrary startup exceptions into skips.
 
-Keep fakeredis tests in `tests/test_redis.py`; remove its environment-gated smoke test after replacing its coverage. Retaining the environment gate would leave real Redis coverage dependent on external setup.
+Move all existing test modules into `tests/unit`, retaining shared models, process isolation helpers, and fixtures under `tests/`. Adjust relative imports and repository-root paths in the moved modules. CI selects tests by directory: the unit step runs `pytest tests/unit` and the following integration step runs `pytest tests/integration`. GitHub Actions' default success condition prevents integration tests from running when unit tests fail.
+
+Keep fakeredis tests in `tests/unit/test_redis.py`; remove its environment-gated smoke test after replacing its coverage. Retaining the environment gate would leave real Redis coverage dependent on external setup.
 
 ### Session container, function-scoped clients
 

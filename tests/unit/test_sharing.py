@@ -6,7 +6,7 @@ import pytest
 from permafrost import DimensionNotFoundError, MemoryBackend, Store, hash_of, keymap
 from permafrost.backends.redis import RedisBackend
 
-from .process import Process
+from ..process import Process
 
 
 @pytest.fixture

@@ -14,7 +14,9 @@ The integration tests create isolated key prefixes and do not need `REDIS_URL`.
 Docker must be able to pull the Redis image and Testcontainers' cleanup helper image.
 
 Run the full suite with `uv run pytest`, only Redis integration tests with
-`uv run pytest -m redis`, or tests without Docker with `uv run pytest -m 'not redis'`.
+`uv run pytest tests/integration`, or unit tests without Docker with `uv run pytest tests/unit`.
+CI runs these directories in separate steps, with integration tests running only
+after unit tests pass.
 Redis integration tests fail if Docker or container startup is unavailable; they
 are not silently skipped. The standalone Redis example still uses `REDIS_URL`,
 and its example test is skipped when that variable is unset.
