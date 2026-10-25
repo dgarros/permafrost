@@ -8,4 +8,5 @@ Permafrost is a Python library that stores deeply nested, read-only data across 
 
 - Python 3.12 or later, managed with `uv`.
 - Source code is in `src/permafrost/`.
-- Run the tests with `uv run pytest`.
+- Run the tests with `uv run pytest`. They include the type check, which you can also run alone with `uv run ty check`.
+- Lint and format with `uv run ruff check` and `uv run ruff format`. Do not use `typing.Any`: declare an exact type, or `object` where the type is open.
