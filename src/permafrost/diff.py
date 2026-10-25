@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 from .codec import SCALAR_TYPES
 from .nodes import FrozenDict, FrozenList, FrozenSet, FrozenTuple
+from .ops import Step
 from .types import freeze, model_info_of, model_values, node_hash
 
 Kind = Literal["added", "removed", "changed"]
@@ -23,13 +24,13 @@ class DiffEntry:
     ``old`` is ``None`` for an added path and ``new`` is ``None`` for a removed path.
     """
 
-    path: tuple[Any, ...]
+    path: tuple[Step, ...]
     kind: Kind
-    old: Any
-    new: Any
+    old: object
+    new: object
 
 
-def diff(a: Any, b: Any) -> list[DiffEntry]:
+def diff(a: object, b: object) -> list[DiffEntry]:
     """Return each path that was added, removed or changed between ``a`` and ``b``.
 
     Dictionaries are compared key by key, models field by field, lists and
@@ -41,7 +42,7 @@ def diff(a: Any, b: Any) -> list[DiffEntry]:
     return out
 
 
-def _same(a: Any, b: Any) -> bool:
+def _same(a: object, b: object) -> bool:
     if a is b:
         return True
     ta = type(a)
@@ -52,14 +53,13 @@ def _same(a: Any, b: Any) -> bool:
     return node_hash(a) == node_hash(b)
 
 
-def _diff(a: Any, b: Any, path: tuple[Any, ...], out: list[DiffEntry]) -> None:
+def _diff(a: object, b: object, path: tuple[Step, ...], out: list[DiffEntry]) -> None:
     if _same(a, b):
         return
-    t = type(a)
-    if t is not type(b) or t in SCALAR_TYPES:
+    if type(a) is not type(b) or type(a) in SCALAR_TYPES:
         out.append(DiffEntry(path, CHANGED, a, b))
         return
-    if t is FrozenDict:
+    if isinstance(a, FrozenDict) and isinstance(b, FrozenDict):
         for key, old in a.items():
             if key in b:
                 _diff(old, b[key], path + (key,), out)
@@ -69,7 +69,7 @@ def _diff(a: Any, b: Any, path: tuple[Any, ...], out: list[DiffEntry]) -> None:
             if key not in a:
                 out.append(DiffEntry(path + (key,), ADDED, None, new))
         return
-    if t is FrozenList or t is FrozenTuple:
+    if isinstance(a, (FrozenList, FrozenTuple)) and isinstance(b, (FrozenList, FrozenTuple)):
         for index in range(max(len(a), len(b))):
             if index >= len(b):
                 out.append(DiffEntry(path + (index,), REMOVED, a[index], None))
@@ -78,7 +78,7 @@ def _diff(a: Any, b: Any, path: tuple[Any, ...], out: list[DiffEntry]) -> None:
             else:
                 _diff(a[index], b[index], path + (index,), out)
         return
-    if t is FrozenSet:
+    if isinstance(a, FrozenSet) and isinstance(b, FrozenSet):
         for item in a:
             if item not in b:
                 out.append(DiffEntry(path + (item,), REMOVED, item, None))

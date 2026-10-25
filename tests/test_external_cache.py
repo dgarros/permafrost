@@ -65,7 +65,7 @@ async def test_fetch_a_value_of_depth_3(setup, collect):
     backend, store = setup
     await store.set("main", "k", {"depth": {"two": ["three", 3]}})
     _forget(store, collect)
-    assert registry.lookup(hash_of({"depth": {"two": ["three", 3]}})) is None
+    assert registry.lookup(hash_of({"depth": {"two": ["three", 3]}}), object) is None
     gets = backend.get_requests
     assert await store.get("main", "k") == {"depth": {"two": ["three", 3]}}
     assert backend.get_requests - gets <= 3
@@ -136,6 +136,31 @@ async def test_one_child_entry_is_missing(setup, collect):
     assert hash_of({"child": [1]}) in backend.nodes
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param(b"\xc1", id="not-msgpack"),
+        pytest.param(b"\x92\x01\x05", id="dict-payload-not-an-array"),
+        pytest.param(b"\x91\x01", id="missing-payload"),
+        pytest.param(b"\x92\x2a\x90", id="unknown-tag"),
+    ],
+)
+async def test_malformed_entry_is_a_cache_miss(setup, collect, entry):
+    backend, store = setup
+    calls = []
+
+    async def loader(d, k):
+        calls.append(k)
+        return {"malformed": [1]}
+
+    store.loader = loader
+    await store.set("main", "k", {"malformed": [1]})
+    _forget(store, collect)
+    backend.nodes[hash_of({"malformed": [1]})] = entry
+    assert await store.get("main", "k") == {"malformed": [1]}
+    assert calls == ["k"]
+
+
 async def test_model_class_that_cannot_be_imported_is_a_cache_miss(setup, collect):
     from pydantic.dataclasses import dataclass
 
@@ -156,7 +181,9 @@ async def test_model_class_that_cannot_be_imported_is_a_cache_miss(setup, collec
     await store.set("main", "k", {"local": Local(name="x")})
     _forget(store, collect)
     # Another process would not know the class: its path cannot be imported.
-    path = types._model_info(Local).path
+    info = types._model_info(Local)
+    assert info is not None
+    path = info.path
     del types._classes_by_path[path]
     assert await store.get("main", "k") == {"local": Local(name="x")}
     assert calls == ["k"]

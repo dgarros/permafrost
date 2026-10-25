@@ -37,3 +37,16 @@ markers = ["redis: tests that need a real Redis server (set REDIS_URL)"]
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
+# ANN401 reports `Any` as a whole annotation; TID251 reports every import of `Any`, including nested uses.
+extend-select = ["ANN401", "TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.Any" = { msg = "Declare an exact type, or `object` where the type is open." }
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+unused-ignore-comment = "error"

@@ -106,7 +106,7 @@ async def test_evict_one_of_two_values_that_share_a_node(clock, collect):
     b = await store.get("main", "b")
     from permafrost import registry
 
-    assert registry.lookup(hash_of(b["shared"])) is b["shared"]
+    assert registry.lookup(hash_of(b["shared"]), object) is b["shared"]
 
 
 async def test_default_without_an_external_cache(clock):

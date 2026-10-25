@@ -3,7 +3,7 @@
 import fakeredis
 import pytest
 
-from permafrost import DimensionNotFoundError, MemoryBackend, Store, keymap
+from permafrost import DimensionNotFoundError, MemoryBackend, Store, hash_of, keymap
 from permafrost.backends.redis import RedisBackend
 
 from .process import Process
@@ -123,6 +123,16 @@ async def test_root_hash_lost_by_the_external_cache(backend, a, b):
     with b:
         with pytest.raises(DimensionNotFoundError):
             await Store(backend).get("main", "k")
+
+
+async def test_root_hash_that_is_not_a_key_map(backend, a, b):
+    with a:
+        store_a = Store(backend)
+        await store_a.create_dimension("main")
+        await store_a.set("main", "k", {"a": 1})
+        backend.roots["main"] = hash_of({"a": 1})
+    with b, pytest.raises(DimensionNotFoundError):
+        await Store(backend).get("main", "k")
 
 
 async def test_pick_up_another_process_change(backend, a, b):

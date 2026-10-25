@@ -9,7 +9,8 @@ import time
 import weakref
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
+from enum import Enum
+from typing import cast
 
 from . import codec, keymap, registry
 from .backends.base import Backend
@@ -21,9 +22,17 @@ from .types import build, children, encode_node, estimate_size, freeze, hash_of,
 
 logger = logging.getLogger(__name__)
 
-Loader = Callable[[str, str], Awaitable[Any]]
+# An async function that returns the value of a key in a dimension, from the application's own storage.
+type Loader[V] = Callable[[str, str], Awaitable[V]]
 
-_MISSING: Any = object()
+
+class _Missing(Enum):
+    """Marks a value or node that no cache holds. ``None`` cannot, because it is a valid value."""
+
+    MISSING = 0
+
+
+_MISSING = _Missing.MISSING
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,8 +43,13 @@ class KeyChange:
     kind: Kind
 
 
-class Store:
+class Store[V]:
     """Holds dimensions of keys and values, and the caches behind them.
+
+    ``V`` is the type of the values, as the application declares it, for
+    example ``Store[Device]``. Declare it with a model, a scalar type or a
+    read-only abstract type such as ``Mapping[str, int]``: the store holds and
+    returns the read-only form of each value.
 
     ``backend`` is the optional external cache. ``loader`` is an ``async``
     function that the store awaits with a dimension name and a key when a
@@ -50,7 +64,7 @@ class Store:
     def __init__(
         self,
         backend: Backend | None = None,
-        loader: Loader | None = None,
+        loader: Loader[V] | None = None,
         *,
         idle_time: float = 3600.0,
         eviction: bool | None = None,
@@ -66,20 +80,20 @@ class Store:
         self._dims: dict[str, KMBranch] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         # Value cache: value hash → value root, in order of last read, oldest first.
-        self._values: dict[bytes, Any] = {}
+        self._values: dict[bytes, object] = {}
         self._read_at: dict[bytes, float] = {}
         self._sizes: dict[bytes, int] = {}
         self._total_size = 0
         self._read_since_cleanup: set[bytes] = set()
         # Nodes created in this process that the backend may not hold yet.
-        self._pending: weakref.WeakValueDictionary[bytes, Any] = weakref.WeakValueDictionary()
+        self._pending: weakref.WeakValueDictionary[bytes, object] = weakref.WeakValueDictionary()
         self._cleanup_task: asyncio.Task[None] | None = None
         if backend is not None:
             for h, node in registry.items():
                 self._pending[h] = node
             registry.add_listener(self)
 
-    def node_created(self, h: bytes, node: Any) -> None:
+    def node_created(self, h: bytes, node: object) -> None:
         self._pending[h] = node
 
     # ------------------------------------------------------------------
@@ -124,10 +138,7 @@ class Store:
             current = self._dims.get(dimension)
             if current is not None and current._pf_hash == h:
                 return
-            root = await self._fetch(h)
-            if root is _MISSING:
-                raise DimensionNotFoundError(dimension, "has key map nodes that the external cache lost")
-            self._dims[dimension] = root
+            self._dims[dimension] = await self._fetch_root(dimension, h)
 
     async def diff_keys(self, a: str, b: str) -> list[KeyChange]:
         """Return the keys whose values differ from dimension ``a`` to dimension ``b``, sorted by key."""
@@ -137,17 +148,17 @@ class Store:
     # ------------------------------------------------------------------
     # Values
 
-    async def get(self, dimension: str, key: str) -> Any:
+    async def get(self, dimension: str, key: str) -> V:
         """Return the value stored under ``key`` in ``dimension``."""
         root = await self._root(dimension)
         vh = keymap.get(root, key)
         if vh is None:
             raise KeyNotFoundError(dimension, key)
-        return await self._value(dimension, key, vh)
+        return self._typed(await self._value(dimension, key, vh))
 
-    async def set(self, dimension: str, key: str, value: Any) -> Any:
+    async def set(self, dimension: str, key: str, value: V) -> V:
         """Store ``value`` under ``key`` in ``dimension`` and return its read-only form."""
-        frozen = freeze(value)
+        frozen = self._typed(freeze(value))
         vh = hash_of(frozen)
         async with self._lock(dimension):
             root = await self._root(dimension)
@@ -163,7 +174,7 @@ class Store:
                 raise KeyNotFoundError(dimension, key)
             await self._commit(dimension, keymap.delete(root, key))
 
-    async def update(self, dimension: str, key: str, change: Callable[[Any], Any]) -> Any:
+    async def update(self, dimension: str, key: str, change: Callable[[V], V | Awaitable[V]]) -> V:
         """Replace the value under ``key`` with ``change(value)`` and return the new value.
 
         ``change`` is usually a call to ``set_in``, ``delete_in`` or ``merge``.
@@ -174,11 +185,11 @@ class Store:
             vh = keymap.get(root, key)
             if vh is None:
                 raise KeyNotFoundError(dimension, key)
-            current = await self._value(dimension, key, vh, locked=True)
+            current = self._typed(await self._value(dimension, key, vh, locked=True))
             result = change(current)
             if inspect.isawaitable(result):
                 result = await result
-            new = freeze(result)
+            new = self._typed(freeze(result))
             nh = hash_of(new)
             await self._commit(dimension, keymap.set(root, key, nh), (new,), previous=root)
         self._cache(nh, new)
@@ -195,11 +206,13 @@ class Store:
             raise KeyNotFoundError(a, key)
         if ha == hb:
             return []
+        old = None if ha is None else await self._value(a, key, ha)
+        new = None if hb is None else await self._value(b, key, hb)
         if ha is None:
-            return [DiffEntry((), ADDED, None, await self._value(b, key, hb))]
+            return [DiffEntry((), ADDED, None, new)]
         if hb is None:
-            return [DiffEntry((), REMOVED, await self._value(a, key, ha), None)]
-        return diff(await self._value(a, key, ha), await self._value(b, key, hb))
+            return [DiffEntry((), REMOVED, old, None)]
+        return diff(old, new)
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -264,13 +277,20 @@ class Store:
     # ------------------------------------------------------------------
     # Internals
 
+    def _typed(self, value: object) -> V:
+        # ``V`` is the application's declaration of what it stores under its
+        # keys. The caches hold nodes without a type, and ``freeze()`` cannot
+        # map a type parameter to its read-only form, so every value that the
+        # store returns gets the declared type here, and only here.
+        return cast(V, value)
+
     def _lock(self, dimension: str) -> asyncio.Lock:
         lock = self._locks.get(dimension)
         if lock is None:
             lock = self._locks[dimension] = asyncio.Lock()
         return lock
 
-    def _cache(self, h: bytes, value: Any) -> None:
+    def _cache(self, h: bytes, value: object) -> None:
         if h in self._values:
             del self._values[h]
             del self._read_at[h]
@@ -297,15 +317,20 @@ class Store:
         h = await self.backend.get_root(dimension)
         if h is None:
             raise DimensionNotFoundError(dimension)
-        fetched = await self._fetch(h)
-        if fetched is _MISSING:
-            raise DimensionNotFoundError(dimension, "has key map nodes that the external cache lost")
-        return self._dims.setdefault(dimension, fetched)
+        return self._dims.setdefault(dimension, await self._fetch_root(dimension, h))
 
-    async def _value(self, dimension: str, key: str, vh: bytes, *, locked: bool = False) -> Any:
+    async def _fetch_root(self, dimension: str, h: bytes) -> KMBranch:
+        root = await self._fetch(h)
+        if root is _MISSING:
+            raise DimensionNotFoundError(dimension, "has key map nodes that the external cache lost")
+        if type(root) is not KMBranch:
+            raise DimensionNotFoundError(dimension, "has a root hash that is not a key map in the external cache")
+        return root
+
+    async def _value(self, dimension: str, key: str, vh: bytes, *, locked: bool = False) -> object:
         value = self._values.get(vh, _MISSING)
         if value is _MISSING:
-            value = registry.lookup(vh)
+            value = registry.lookup(vh, object)
             if value is None:
                 value = _MISSING
         if value is _MISSING and self.backend is not None:
@@ -330,7 +355,7 @@ class Store:
         return loaded
 
     async def _commit(
-        self, dimension: str, root: KMBranch, values: Iterable[Any] = (), *, previous: KMBranch | None = None
+        self, dimension: str, root: KMBranch, values: Iterable[object] = (), *, previous: KMBranch | None = None
     ) -> None:
         """Write new nodes, then the root hash, then switch the dimension in memory. The lock must be held."""
         await self._send((root, *values))
@@ -340,7 +365,7 @@ class Store:
             await self.backend.set_root(dimension, root._pf_hash)
         self._dims[dimension] = root
 
-    async def _send(self, roots: Iterable[Any], *, every_node: bool = False) -> None:
+    async def _send(self, roots: Iterable[object], *, every_node: bool = False) -> None:
         """Write to the backend, in one request, the nodes of these trees that it may not hold.
 
         With ``every_node``, write every node of the trees.
@@ -364,20 +389,20 @@ class Store:
             for h in out:
                 self._pending.pop(h, None)
 
-    async def _fetch(self, root_hash: bytes) -> Any:
+    async def _fetch(self, root_hash: bytes) -> object | _Missing:
         """Fetch a tree from the backend, one level at a time. Return ``_MISSING`` if any node is missing."""
         assert self.backend is not None
-        payloads: dict[bytes, list[Any]] = {}
+        payloads: dict[bytes, list[object]] = {}
         # Strong references to the nodes already in memory, so that they stay
         # in the registry until the tree is built.
-        held: list[Any] = []
+        held: list[object] = []
         level = [root_hash]
         while level:
             need = []
             for h in dict.fromkeys(level):
                 if h in payloads:
                     continue
-                node = registry.lookup(h)
+                node = registry.lookup(h, object)
                 if node is None:
                     need.append(h)
                 else:
@@ -389,15 +414,19 @@ class Store:
             for h, data in zip(need, found):
                 if data is None:
                     return _MISSING
-                payload = codec.unpack(data)
+                try:
+                    payload = codec.unpack(data)
+                except ValueError as exc:
+                    logger.warning("cannot decode node %s from the external cache: %s", h.hex(), exc)
+                    return _MISSING
                 payloads[h] = payload
                 level.extend(codec.refs_in(payload))
         if payloads:
             await self.backend.touch(list(payloads))
-        built: dict[bytes, Any] = {}
+        built: dict[bytes, object] = {}
 
-        def resolve(h: bytes) -> Any:
-            node = registry.lookup(h)
+        def resolve(h: bytes) -> object:
+            node = registry.lookup(h, object)
             if node is not None:
                 return node
             node = built.get(h, _MISSING)
@@ -407,7 +436,7 @@ class Store:
 
         try:
             return resolve(root_hash)
-        except (ImportError, AttributeError, KeyError) as exc:
+        except (ImportError, AttributeError, KeyError, ValueError) as exc:
             logger.warning("cannot rebuild node %s from the external cache: %s", root_hash.hex(), exc)
             return _MISSING
 
@@ -423,12 +452,13 @@ class Store:
             else:
                 hashes.update(node_hash(n) for n in walk(value))
         self._read_since_cleanup.clear()
-        stack: list[Any] = list(self._dims.values())
+        stack: list[object] = list(self._dims.values())
         while stack:
             node = stack.pop()
-            if node._pf_hash in hashes:
+            h = node_hash(node)
+            if h in hashes:
                 continue
-            hashes.add(node._pf_hash)
+            hashes.add(h)
             stack.extend(children(node))
         if hashes:
             await self.backend.touch(list(hashes))

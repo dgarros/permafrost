@@ -58,7 +58,7 @@ def test_decoding_returns_equal_content(collect):
     payloads = _payloads(node)
     del node
     collect()
-    assert registry.lookup(root_hash) is None
+    assert registry.lookup(root_hash, object) is None
 
     built = {}
 

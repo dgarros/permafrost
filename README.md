@@ -122,7 +122,7 @@ assert hash_of(Prefix("10.0.0.0", 8)) != hash_of(Prefix("10.0.0.0", 16))
 
 Stored data changes only through `set_in()`, `delete_in()` and `merge()`. Each returns a new version of the value and leaves the previous version unchanged. Only the changed node and its parents are new: every other node is the same object in both versions.
 
-A path is a sequence of steps: dictionary keys, list or tuple indexes, and model field names. A step that does not exist raises `PathError`, except that `set_in()` adds a missing key at the end of the path.
+A path is a sequence of steps: dictionary keys, list or tuple indexes, and model field names. A step that does not exist raises `PathError`, except that `set_in()` adds a missing key at the end of the path. An empty path also raises `PathError`: to replace a whole value, call `freeze()` on the new value.
 
 ```python
 from permafrost import delete_in, freeze, set_in
@@ -167,7 +167,7 @@ assert merge(device, {"config": {"ntp": ["10.0.0.2"]}}, lists="append")["config"
 
 `equal(a, b)` compares the hashes of two values without reading their children. Comparing two frozen values with `==` also compares their hashes.
 
-`diff(a, b)` returns a list of `DiffEntry` objects. Each entry gives the `path`, the `kind` of change (`"added"`, `"removed"` or `"changed"`), the `old` content and the `new` content.
+`diff(a, b)` returns a list of `DiffEntry` objects. Each entry gives the `path`, the `kind` of change (`"added"`, `"removed"` or `"changed"`), the `old` content and the `new` content. The content at a path can be of any type, so `old` and `new` are declared as `object`: check their type with `isinstance()` before you use them.
 
 - Dictionaries are compared key by key and models field by field.
 - Lists and tuples are compared index by index. Items past the end of the shorter side are reported as added or removed.
@@ -305,6 +305,56 @@ asyncio.run(main())
 - A value that no dimension refers to any more, for example after its key was deleted, stays in the value cache until cleanup evicts it.
 - With an external cache, cleanup also extends the expiry time of the values read since the previous cleanup and of the key maps of the dimensions in memory, so that entries in use in this process do not expire for other processes.
 - The task that `start_cleanup()` starts logs and skips a cleanup that fails, and runs again at the next interval.
+
+## Type checking
+
+Permafrost declares an exact type for every public function and class, so a type checker checks the code that stores and reads values. The project checks its own types with [ty](https://github.com/astral-sh/ty).
+
+- `freeze()`, `set_in()`, `delete_in()` and `merge()` return the class of a model, the type of a scalar, and a read-only collection with the item types of the input. A `dict[str, int]` becomes a `FrozenDict[str, int]`, a `list[int]` a `FrozenList[int]`, a `tuple[int, ...]` a `FrozenTuple[int]` and a `set[int]` a `FrozenSet[int]`.
+- `Store[V]` stores and returns values of type `V`, and its loader must return a `V`.
+- Where the type cannot be known, Permafrost declares `object`, so that the type checker asks you to check the type with `isinstance()` before you use the value. This is the case for the `old` and `new` content of a `DiffEntry`, and for objects of a registered type.
+
+The types are exact when you declare values with models, scalars, or the read-only abstract types `Mapping`, `Sequence` and `AbstractSet` (`collections.abc.Set`). A value declared as `list`, `dict` or `set` inside another value holds the read-only class at run time: `freeze()` on a `dict[str, list[int]]` returns a `FrozenDict[str, list[int]]` whose values are `FrozenList` objects, which have no `append()`. This is the same rule as for model fields declared as `list`.
+
+A dictionary whose values have different types gives a union, or `object`, for each value. Check the type of a value with `isinstance()` before you read it, or define a model for the data, whose fields have exact types.
+
+Declare the type of a store when you create it, in one of these two ways. A store created as `Store()` without a type is not checked.
+
+```python
+import asyncio
+from typing import assert_type
+
+from pydantic.dataclasses import dataclass
+
+from permafrost import FrozenModel, Store, merge
+
+
+@dataclass(frozen=True, slots=True)
+class Router(FrozenModel):
+    name: str
+    site: str
+
+
+async def load_router(dimension: str, key: str) -> Router:
+    return Router(name=key, site="paris")
+
+
+async def main():
+    store = Store[Router](loader=load_router)
+    routers: Store[Router] = Store(loader=load_router)
+    await store.create_dimension("main")
+    await store.set("main", "r1", Router(name="r1", site="paris"))
+    router = await store.get("main", "r1")
+    assert_type(router, Router)
+    moved = merge(router, {"site": "lyon"})
+    assert_type(moved, Router)
+    assert moved.site == "lyon"
+
+
+asyncio.run(main())
+```
+
+`register_type(cls, *, name, encode, decode)` is typed by the class and by the type of the encoded value: `encode` takes a `cls` instance and returns an `E`, and `decode` takes an `E` and returns a `cls` instance. `decode` receives the frozen form of the encoded value, so declare `E` with `tuple` or `Sequence`, not `list`.
 
 ## External cache
 

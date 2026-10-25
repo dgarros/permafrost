@@ -229,6 +229,15 @@ These rules come from the existing project notes in `AGENTS.md` and need confirm
 - Without an external cache, eviction is optional. When it is turned on, a read of an evicted value calls the loader.
 - The in-memory cache can also have a memory limit. When it reaches the limit, cleanup evicts the values read least recently first.
 
+### 12. Accurate static types
+
+- A type checker checks the code that uses Permafrost. Every public function and class declares exact types, and the library does not declare `Any`.
+- Storing, freezing, updating and merging a model returns the model's own class. A scalar keeps its type. Read-only collections take the item types of the input.
+- A store is declared with the type of its values, and its loader must return that type.
+- Where a type cannot be known, such as the content at a path in a diff, the declared type is `object`, so that the calling code checks the type before it uses the value.
+- The types are exact when values are declared with models, scalars, or read-only abstract types such as `Mapping` and `Sequence`. A value declared as `list`, `dict` or `set` inside another value holds the read-only class at run time.
+- The type check runs with the tests, and a type error fails them.
+
 ## Out of scope
 
 - Tracking state or history of changes over time. The existing project notes say this could be added later as a separate class built on Permafrost.

@@ -73,7 +73,7 @@ def build_site() -> Site:
 def read_only_models() -> None:
     print("== Read-only models")
     try:
-        Interface(name="eth0", vlans=("not-a-vlan",))
+        Interface(name="eth0", vlans=("not-a-vlan",))  # ty: ignore[invalid-argument-type]
     except ValidationError:
         print("refused by Pydantic: a VLAN that is not an integer")
 
@@ -84,7 +84,7 @@ def read_only_models() -> None:
 
     # Model instances are read-only.
     try:
-        site.devices[0].interfaces[0].enabled = False
+        site.devices[0].interfaces[0].enabled = False  # ty: ignore[invalid-assignment]
     except AttributeError as error:
         print(f"refused: change a field ({type(error).__name__})")
 
@@ -128,7 +128,7 @@ def changes_and_diff() -> None:
 
 async def dimensions() -> None:
     print("\n== Dimensions")
-    store = Store()
+    store = Store[Device]()
     await store.create_dimension(name="main")
     site = build_site()
     for device in site.devices:

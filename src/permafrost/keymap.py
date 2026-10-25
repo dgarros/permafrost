@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from typing import Literal
 
 from . import codec, registry
-from .nodes import KMBranch, KMCollision
+from .nodes import KMBranch, KMChild, KMCollision
 from .types import node_hash
 
 BITS = 5
@@ -22,7 +22,6 @@ BITS = 5
 # equal on all of them share a collision node at the next level.
 MAX_DEPTH = 25
 
-KeyMapNode = KMBranch | KMCollision
 Entry = tuple[str, bytes]
 Kind = Literal["added", "removed", "changed"]
 
@@ -35,9 +34,9 @@ def _slot(kh: int, depth: int) -> int:
     return (kh >> (128 - BITS * (depth + 1))) & 31
 
 
-def make_branch(bitmap: int, children: tuple[object, ...]) -> KMBranch:
+def make_branch(bitmap: int, children: tuple[KMChild, ...]) -> KMBranch:
     h = codec.digest(codec.encode_km_branch(bitmap, children, node_hash))
-    node = registry.lookup(h)
+    node = registry.lookup(h, KMBranch)
     if node is not None:
         return node
     return registry.add(h, KMBranch._new(bitmap, children, h))
@@ -46,7 +45,7 @@ def make_branch(bitmap: int, children: tuple[object, ...]) -> KMBranch:
 def make_collision(entries: tuple[Entry, ...]) -> KMCollision:
     entries = tuple(sorted(entries))
     h = codec.digest(codec.encode_km_collision(entries))
-    node = registry.lookup(h)
+    node = registry.lookup(h, KMCollision)
     if node is not None:
         return node
     return registry.add(h, KMCollision._new(entries, h))
@@ -60,10 +59,10 @@ def empty() -> KMBranch:
 EMPTY = empty()
 
 
-def get(root: KeyMapNode, key: str) -> bytes | None:
+def get(root: KMBranch, key: str) -> bytes | None:
     """Return the value hash stored under ``key``, or ``None``."""
     kh = key_hash(key)
-    node: object = root
+    node: KMBranch | KMCollision = root
     depth = 0
     while True:
         if type(node) is KMCollision:
@@ -71,23 +70,24 @@ def get(root: KeyMapNode, key: str) -> bytes | None:
                 if k == key:
                     return v
             return None
-        assert type(node) is KMBranch
         bit = 1 << _slot(kh, depth)
         if not node.bitmap & bit:
             return None
         child = node.children[(node.bitmap & (bit - 1)).bit_count()]
-        if type(child) is tuple:
+        if isinstance(child, tuple):
             return child[1] if child[0] == key else None
         node = child
         depth += 1
 
 
-def set(root: KeyMapNode, key: str, value_hash: bytes) -> KeyMapNode:  # noqa: A001
+def set(root: KMBranch, key: str, value_hash: bytes) -> KMBranch:  # noqa: A001
     """Return a key map with ``key`` set to ``value_hash``."""
-    return _set(root, key, key_hash(key), value_hash, 0)
+    result = _set(root, key, key_hash(key), value_hash, 0)
+    assert type(result) is KMBranch
+    return result
 
 
-def _set(node: KeyMapNode, key: str, kh: int, vh: bytes, depth: int) -> KeyMapNode:
+def _set(node: KMBranch | KMCollision, key: str, kh: int, vh: bytes, depth: int) -> KMBranch | KMCollision:
     if type(node) is KMCollision:
         entries = dict(node.entries)
         if entries.get(key) == vh:
@@ -100,8 +100,8 @@ def _set(node: KeyMapNode, key: str, kh: int, vh: bytes, depth: int) -> KeyMapNo
     if not node.bitmap & bit:
         return make_branch(node.bitmap | bit, kids[:idx] + ((key, vh),) + kids[idx:])
     child = kids[idx]
-    new_child: object
-    if type(child) is tuple:
+    new_child: KMChild
+    if isinstance(child, tuple):
         if child[0] == key:
             if child[1] == vh:
                 return node
@@ -115,7 +115,7 @@ def _set(node: KeyMapNode, key: str, kh: int, vh: bytes, depth: int) -> KeyMapNo
     return make_branch(node.bitmap, kids[:idx] + (new_child,) + kids[idx + 1 :])
 
 
-def _pair(e1: Entry, kh1: int, e2: Entry, kh2: int, depth: int) -> KeyMapNode:
+def _pair(e1: Entry, kh1: int, e2: Entry, kh2: int, depth: int) -> KMBranch | KMCollision:
     """Return the node that holds two entries whose keys share the prefix up to ``depth``."""
     if depth >= MAX_DEPTH:
         return make_collision((e1, e2))
@@ -127,14 +127,14 @@ def _pair(e1: Entry, kh1: int, e2: Entry, kh2: int, depth: int) -> KeyMapNode:
     return make_branch((1 << s1) | (1 << s2), (e1, e2))
 
 
-def delete(root: KeyMapNode, key: str) -> KeyMapNode:
+def delete(root: KMBranch, key: str) -> KMBranch:
     """Return a key map without ``key``. Returns ``root`` when the key is absent."""
     result = _delete(root, key, key_hash(key), 0)
     assert type(result) is KMBranch
     return result
 
 
-def _delete(node: KeyMapNode, key: str, kh: int, depth: int) -> object:
+def _delete(node: KMBranch | KMCollision, key: str, kh: int, depth: int) -> KMChild | None:
     """Return the new node, an entry when only one entry is left below depth 0, or ``None``."""
     if type(node) is KMCollision:
         entries = tuple(e for e in node.entries if e[0] != key)
@@ -149,7 +149,8 @@ def _delete(node: KeyMapNode, key: str, kh: int, depth: int) -> object:
     idx = (node.bitmap & (bit - 1)).bit_count()
     kids = node.children
     child = kids[idx]
-    if type(child) is tuple:
+    new_child: KMChild | None
+    if isinstance(child, tuple):
         if child[0] != key:
             return node
         new_child = None
@@ -168,35 +169,35 @@ def _delete(node: KeyMapNode, key: str, kh: int, depth: int) -> object:
     return make_branch(bitmap, kids)
 
 
-def items(root: KeyMapNode) -> Iterator[Entry]:
+def items(root: KMChild) -> Iterator[Entry]:
     """Yield each ``(key, value_hash)`` entry, in no defined order."""
-    stack: list[object] = [root]
+    stack: list[KMChild] = [root]
     while stack:
         node = stack.pop()
-        if type(node) is tuple:
-            yield node  # type: ignore[misc]
+        if isinstance(node, tuple):
+            yield node
         elif type(node) is KMCollision:
             yield from node.entries
         else:
-            stack.extend(node.children)  # type: ignore[attr-defined]
+            stack.extend(node.children)
 
 
-def keys(root: KeyMapNode) -> Iterator[str]:
+def keys(root: KMBranch) -> Iterator[str]:
     for key, _ in items(root):
         yield key
 
 
-def nodes(root: KeyMapNode) -> Iterator[KeyMapNode]:
+def nodes(root: KMBranch) -> Iterator[KMBranch | KMCollision]:
     """Yield each key map node of the tree."""
-    stack: list[object] = [root]
+    stack: list[KMBranch | KMCollision] = [root]
     while stack:
         node = stack.pop()
-        yield node  # type: ignore[misc]
+        yield node
         if type(node) is KMBranch:
-            stack.extend(c for c in node.children if type(c) is not tuple)
+            stack.extend(c for c in node.children if not isinstance(c, tuple))
 
 
-def diff(a: KeyMapNode, b: KeyMapNode) -> list[tuple[str, Kind]]:
+def diff(a: KMBranch, b: KMBranch) -> list[tuple[str, Kind]]:
     """Return the keys whose value hashes differ between two key maps.
 
     Subtrees with the same hash on both sides are skipped.
@@ -206,22 +207,21 @@ def diff(a: KeyMapNode, b: KeyMapNode) -> list[tuple[str, Kind]]:
     return out
 
 
-def _diff_nodes(a: object, b: object, out: list[tuple[str, Kind]]) -> None:
+def _diff_nodes(a: KMChild | None, b: KMChild | None, out: list[tuple[str, Kind]]) -> None:
     if a is b:
         return
-    ta, tb = type(a), type(b)
-    if ta is KMBranch and tb is KMBranch:
-        if a._pf_hash == b._pf_hash:  # type: ignore[attr-defined]
+    if type(a) is KMBranch and type(b) is KMBranch:
+        if a._pf_hash == b._pf_hash:
             return
-        bitmap = a.bitmap | b.bitmap  # type: ignore[attr-defined]
+        bitmap = a.bitmap | b.bitmap
         while bitmap:
             bit = bitmap & -bitmap
             bitmap ^= bit
             _diff_nodes(_child(a, bit), _child(b, bit), out)
         return
-    if ta is tuple and tb is tuple and a == b:
+    if type(a) is tuple and type(b) is tuple and a == b:
         return
-    if ta is KMCollision and tb is KMCollision and a._pf_hash == b._pf_hash:  # type: ignore[attr-defined]
+    if type(a) is KMCollision and type(b) is KMCollision and a._pf_hash == b._pf_hash:
         return
     left = dict(_entries(a))
     right = dict(_entries(b))
@@ -235,15 +235,13 @@ def _diff_nodes(a: object, b: object, out: list[tuple[str, Kind]]) -> None:
         out.append((key, "added"))
 
 
-def _child(node: object, bit: int) -> object:
-    if not node.bitmap & bit:  # type: ignore[attr-defined]
+def _child(node: KMBranch, bit: int) -> KMChild | None:
+    if not node.bitmap & bit:
         return None
-    return node.children[(node.bitmap & (bit - 1)).bit_count()]  # type: ignore[attr-defined]
+    return node.children[(node.bitmap & (bit - 1)).bit_count()]
 
 
-def _entries(node: object) -> Iterator[Entry]:
+def _entries(node: KMChild | None) -> Iterator[Entry]:
     if node is None:
         return iter(())
-    if type(node) is tuple:
-        return iter((node,))  # type: ignore[arg-type]
-    return items(node)  # type: ignore[arg-type]
+    return items(node)

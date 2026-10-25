@@ -20,10 +20,11 @@ import multiprocessing
 import os
 import sys
 import uuid
+from collections.abc import Mapping
 
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from permafrost import Store, set_in
+from permafrost import FrozenList, Store, set_in
 from permafrost.backends.redis import RedisBackend
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
@@ -41,7 +42,7 @@ def log(process: str, message: str) -> None:
 
 async def process_a(prefix: str, to_b: multiprocessing.Queue, from_b: multiprocessing.Queue) -> None:
     backend = RedisBackend.from_url(url=REDIS_URL, prefix=prefix)
-    store = Store(backend=backend)
+    store = Store[Mapping[str, object]](backend=backend)
 
     await store.create_dimension(name="main")
     for name, device in DEVICES.items():
@@ -74,7 +75,7 @@ async def process_a(prefix: str, to_b: multiprocessing.Queue, from_b: multiproce
 
 async def process_b(prefix: str, to_a: multiprocessing.Queue, from_a: multiprocessing.Queue) -> None:
     backend = RedisBackend.from_url(url=REDIS_URL, prefix=prefix)
-    store = Store(backend=backend)
+    store = Store[Mapping[str, object]](backend=backend)
 
     dimension = await asyncio.to_thread(from_a.get)
     log(process="B", message=f"received {dimension}")
@@ -82,7 +83,9 @@ async def process_b(prefix: str, to_a: multiprocessing.Queue, from_a: multiproce
     for change in await store.diff_keys(a="main", b=dimension):
         log(process="B", message=f"{change.kind:8} key {change.key}")
     r1 = await store.get(dimension=dimension, key="r1")
-    log(process="B", message=f"r1 in {dimension} has VLANs {list(r1['vlans'])}")
+    vlans = r1["vlans"]
+    assert isinstance(vlans, FrozenList)
+    log(process="B", message=f"r1 in {dimension} has VLANs {list(vlans)}")
 
     await store.create_dimension(name="branch-b", source=dimension)
     await store.update(

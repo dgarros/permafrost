@@ -10,15 +10,15 @@ from .models import Device, Site
 def test_dict_cannot_change():
     d = freeze({"a": 1})
     with pytest.raises(TypeError):
-        d["b"] = 2  # type: ignore[index]
+        d["b"] = 2  # ty: ignore[invalid-assignment]
     with pytest.raises(TypeError):
-        del d["a"]  # type: ignore[attr-defined]
+        del d["a"]  # ty: ignore[not-subscriptable]
     with pytest.raises(AttributeError):
-        d.update({"b": 2})  # type: ignore[attr-defined]
+        d.update({"b": 2})  # ty: ignore[unresolved-attribute]
     with pytest.raises(AttributeError):
-        d.pop("a")  # type: ignore[attr-defined]
+        d.pop("a")  # ty: ignore[unresolved-attribute]
     with pytest.raises(ReadOnlyError):
-        d._data = {}  # type: ignore[misc]
+        d._data = {}  # ty: ignore[invalid-assignment]
     with pytest.raises(ReadOnlyError):
         d |= {"b": 2}
     assert d == {"a": 1}
@@ -38,11 +38,11 @@ def test_list_cannot_change():
         with pytest.raises(AttributeError):
             getattr(lst, method)(*args)
     with pytest.raises(TypeError):
-        lst[0] = 5  # type: ignore[index]
+        lst[0] = 5  # ty: ignore[invalid-assignment]
     with pytest.raises(TypeError):
-        del lst[0]  # type: ignore[attr-defined]
+        del lst[0]  # ty: ignore[not-subscriptable]
     with pytest.raises(ReadOnlyError):
-        lst.foo = 1  # type: ignore[attr-defined]
+        lst.foo = 1  # ty: ignore[invalid-assignment]
     assert lst == [1, 2]
 
 
@@ -57,10 +57,10 @@ def test_set_cannot_change():
 def test_model_field_cannot_change():
     d = freeze(Device(name="r1"))
     with pytest.raises(Exception):
-        d.name = "r2"  # type: ignore[misc]
+        d.name = "r2"  # ty: ignore[invalid-assignment]
     m = freeze(Site(name="s"))
     with pytest.raises(Exception):
-        m.name = "t"  # type: ignore[misc]
+        m.name = "t"  # ty: ignore[invalid-assignment]
     with pytest.raises(AttributeError):
         m.devices.append("x")
     assert d.name == "r1"
@@ -93,6 +93,19 @@ def test_read_operations_and_equality():
 def test_nodes_support_weak_references():
     for value in ({"a": 1}, [1], (1,), {1}, Device(name="r1"), Site(name="s")):
         node = freeze(value)
+        assert weakref.ref(node)() is node
+
+
+def test_collections_have_no_instance_dict():
+    # The type parameters must not add a __dict__ to the slotted classes.
+    for node, cls in (
+        (freeze({"slots": 1}), FrozenDict),
+        (freeze(["slots"]), FrozenList),
+        (freeze(("slots",)), FrozenTuple),
+        (freeze({"slots"}), FrozenSet),
+    ):
+        assert type(node) is cls
+        assert not hasattr(node, "__dict__")
         assert weakref.ref(node)() is node
 
 

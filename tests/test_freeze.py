@@ -139,7 +139,7 @@ def test_value_that_nothing_refers_to_is_freed(collect):
     hashes = [hash_of(node), hash_of(node["freed"]), hash_of(node["freed"]["inner"])]
     del node
     collect()
-    assert all(registry.lookup(h) is None for h in hashes)
+    assert all(registry.lookup(h, object) is None for h in hashes)
 
 
 def test_frozen_input_is_returned_as_is():

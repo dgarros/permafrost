@@ -69,6 +69,15 @@ def test_from_url():
     assert backend.prefix == "x:" and backend.node_ttl == 5
 
 
+async def test_client_that_returns_strings():
+    client = fakeredis.FakeAsyncRedis(decode_responses=True)
+    backend = RedisBackend(client, prefix="test:")
+    await client.set("test:dim:main", "abc")
+    with pytest.raises(TypeError, match="decode_responses=False"):
+        await backend.get_root("main")
+    await client.aclose()
+
+
 @pytest.mark.redis
 @pytest.mark.skipif(not os.environ.get("REDIS_URL"), reason="REDIS_URL is not set")
 async def test_real_redis_server(collect):

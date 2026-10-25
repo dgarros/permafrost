@@ -8,6 +8,7 @@ Run with: uv run python examples/nested_values.py
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 
 from permafrost import (
     FrozenDict,
@@ -29,27 +30,35 @@ device = {
 }
 
 
+def children(
+    value: Mapping[str, object],
+) -> tuple[FrozenDict[object, object], FrozenList[object], FrozenSet[object]]:
+    # The values of `device` have different types, so a type checker sees each
+    # child as a union of them. Checking the class of each child narrows it.
+    location, vlans, tags = value["location"], value["vlans"], value["tags"]
+    assert isinstance(location, FrozenDict)
+    assert isinstance(vlans, FrozenList)
+    assert isinstance(tags, FrozenSet)
+    return location, vlans, tags
+
+
 def read_only_values() -> None:
     print("== Read-only values")
     frozen = freeze(value=device)
 
     # Each child becomes the read-only form of its type.
     assert isinstance(frozen, FrozenDict)
-    assert isinstance(frozen["location"], FrozenDict)
-    assert isinstance(frozen["vlans"], FrozenList)
-    assert isinstance(frozen["tags"], FrozenSet)
-    print("location:", frozen["location"]["site"])
-    print("vlans:", list(frozen["vlans"]))
-    print("tags:", sorted(frozen["tags"]))
+    location, vlans, tags = children(value=frozen)
+    print("location:", location["site"])
+    print("vlans:", list(vlans))
+    print("tags:", sorted(map(str, tags)))
 
-    # Every operation that would change a node raises an error.
+    # Every operation that would change a node raises an error. A type checker
+    # reports these lines too, because the read-only classes have no such methods.
     for description, change in (
-        (
-            "set a key of the dict",
-            lambda: frozen["location"].__setitem__("site", "lyon"),
-        ),
-        ("append to the list", lambda: frozen["vlans"].append(30)),
-        ("add to the set", lambda: frozen["tags"].add("access")),
+        ("set a key of the dict", lambda: location.__setitem__("site", "lyon")),  # ty: ignore[unresolved-attribute]
+        ("append to the list", lambda: vlans.append(30)),  # ty: ignore[unresolved-attribute]
+        ("add to the set", lambda: tags.add("access")),  # ty: ignore[unresolved-attribute]
     ):
         try:
             change()
@@ -77,11 +86,12 @@ def changes_and_diff() -> None:
     after = set_in(value=before, path=("location", "rack"), new="B03")
     after = set_in(value=after, path=("vlans", 1), new=21)
     after = set_in(value=after, path=("tags",), new={"core", "access"})
-    assert before["location"]["rack"] == "A12"
+    assert children(value=before)[0]["rack"] == "A12"
 
     # merge() adds the new list items at the end with lists="append".
     after = merge(value=after, partial={"vlans": [30]}, lists="append")
-    print("after:", after["location"]["rack"], list(after["vlans"]), sorted(after["tags"]))
+    location, vlans, tags = children(value=after)
+    print("after:", location["rack"], list(vlans), sorted(map(str, tags)))
 
     # Children that did not change are the same object in both versions.
     unchanged = set_in(value=before, path=("hostname",), new="r1-paris")
@@ -95,7 +105,8 @@ def changes_and_diff() -> None:
 
 async def dimensions() -> None:
     print("\n== Dimensions")
-    store = Store()
+    # The values are dictionaries whose values have different types.
+    store = Store[Mapping[str, object]]()
     await store.create_dimension(name="main")
     await store.set(dimension="main", key="r1", value=device)
 
@@ -107,10 +118,10 @@ async def dimensions() -> None:
         change=lambda value: set_in(value=value, path=("vlans", 0), new=11),
     )
 
-    print("main vlans:", list((await store.get(dimension="main", key="r1"))["vlans"]))
+    print("main vlans:", list(children(value=await store.get(dimension="main", key="r1"))[1]))
     print(
         "branch-a vlans:",
-        list((await store.get(dimension="branch-a", key="r1"))["vlans"]),
+        list(children(value=await store.get(dimension="branch-a", key="r1"))[1]),
     )
     for change in await store.diff_keys(a="main", b="branch-a"):
         print("key", change)

@@ -52,8 +52,11 @@ def test_set_a_field_that_the_model_does_not_have():
         set_in(Device(name="r1"), ("vendor",), "x")
 
 
-def test_set_the_root():
-    assert set_in({"a": 1}, (), [1]) == [1]
+def test_set_with_an_empty_path():
+    before = freeze({"a": 1})
+    with pytest.raises(PathError, match="freeze"):
+        set_in(before, (), [1])
+    assert before == {"a": 1}
 
 
 def test_set_an_item_of_a_tuple_field():
@@ -128,7 +131,7 @@ def test_merge_lists_with_append():
 
 def test_merge_with_an_unknown_list_behavior():
     with pytest.raises(ValueError):
-        merge({}, {}, lists="incremental")  # type: ignore[arg-type]
+        merge({}, {}, lists="incremental")  # ty: ignore[no-matching-overload]
 
 
 # Sharing

@@ -7,54 +7,57 @@ the slots through the member descriptors and so bypasses ``__setattr__``.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence, Set
-from typing import Any, NoReturn
+from collections.abc import ItemsView, Iterable, Iterator, KeysView, Mapping, Sequence, Set, ValuesView
+from typing import NoReturn, Self, final, overload
 
 from .errors import ReadOnlyError
 
 
-def _read_only(self: object, *args: Any) -> NoReturn:
+def _read_only(self: object, *args: object) -> NoReturn:
     raise ReadOnlyError(f"{type(self).__name__} is read-only")
 
 
 class _Frozen:
     __slots__ = ()
 
+    _pf_hash: bytes
+
     __setattr__ = _read_only
     __delattr__ = _read_only
 
     def __hash__(self) -> int:
-        return int.from_bytes(self._pf_hash[:8])  # type: ignore[attr-defined]
+        return int.from_bytes(self._pf_hash[:8])
 
-    def __copy__(self) -> Any:
+    def __copy__(self) -> Self:
         return self
 
-    def __deepcopy__(self, memo: Any) -> Any:
+    def __deepcopy__(self, memo: object) -> Self:
         return self
 
     def __reduce__(self) -> NoReturn:
         raise TypeError(f"{type(self).__name__} cannot be pickled")
 
 
-class FrozenDict(_Frozen, Mapping[Any, Any]):
+@final
+class FrozenDict[K, V](_Frozen, Mapping[K, V]):
     """Read-only dictionary."""
 
     __slots__ = ("_data", "_pf_hash", "__weakref__")
 
-    _data: dict[Any, Any]
+    _data: dict[K, V]
     _pf_hash: bytes
 
     @classmethod
-    def _new(cls, data: dict[Any, Any], h: bytes) -> FrozenDict:
+    def _new(cls, data: dict[K, V], h: bytes) -> FrozenDict[K, V]:
         obj = object.__new__(cls)
         _set_dict_data(obj, data)
         _set_dict_hash(obj, h)
         return obj
 
-    def __getitem__(self, key: Any) -> Any:
+    def __getitem__(self, key: K) -> V:
         return self._data[key]
 
-    def __iter__(self) -> Iterator[Any]:
+    def __iter__(self) -> Iterator[K]:
         return iter(self._data)
 
     def __len__(self) -> int:
@@ -63,16 +66,20 @@ class FrozenDict(_Frozen, Mapping[Any, Any]):
     def __contains__(self, key: object) -> bool:
         return key in self._data
 
-    def keys(self):  # type: ignore[override]
+    def keys(self) -> KeysView[K]:
         return self._data.keys()
 
-    def values(self):  # type: ignore[override]
+    def values(self) -> ValuesView[V]:
         return self._data.values()
 
-    def items(self):  # type: ignore[override]
+    def items(self) -> ItemsView[K, V]:
         return self._data.items()
 
-    def get(self, key: Any, default: Any = None) -> Any:
+    @overload
+    def get(self, key: object, /) -> V | None: ...
+    @overload
+    def get[D](self, key: object, default: D, /) -> V | D: ...
+    def get(self, key: object, default: object = None, /) -> object:
         return self._data.get(key, default)
 
     def __eq__(self, other: object) -> bool:
@@ -91,15 +98,19 @@ class FrozenDict(_Frozen, Mapping[Any, Any]):
         return f"FrozenDict({self._data!r})"
 
 
-class _FrozenSequence(_Frozen, Sequence[Any]):
+class _FrozenSequence[T](_Frozen, Sequence[T]):
     __slots__ = ()
 
-    _data: tuple[Any, ...]
+    _data: tuple[T, ...]
 
-    def __getitem__(self, index: Any) -> Any:
+    @overload
+    def __getitem__(self, index: int) -> T: ...
+    @overload
+    def __getitem__(self, index: slice) -> tuple[T, ...]: ...
+    def __getitem__(self, index: int | slice) -> T | tuple[T, ...]:
         return self._data[index]
 
-    def __iter__(self) -> Iterator[Any]:
+    def __iter__(self) -> Iterator[T]:
         return iter(self._data)
 
     def __len__(self) -> int:
@@ -108,14 +119,15 @@ class _FrozenSequence(_Frozen, Sequence[Any]):
     def __contains__(self, item: object) -> bool:
         return item in self._data
 
-    def __reversed__(self) -> Iterator[Any]:
+    def __reversed__(self) -> Iterator[T]:
         return reversed(self._data)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({list(self._data)!r})"
 
 
-class FrozenList(_FrozenSequence):
+@final
+class FrozenList[T](_FrozenSequence[T]):
     """Read-only list."""
 
     __slots__ = ("_data", "_pf_hash", "__weakref__")
@@ -123,7 +135,7 @@ class FrozenList(_FrozenSequence):
     _pf_hash: bytes
 
     @classmethod
-    def _new(cls, items: tuple[Any, ...], h: bytes) -> FrozenList:
+    def _new(cls, items: tuple[T, ...], h: bytes) -> FrozenList[T]:
         obj = object.__new__(cls)
         _set_list_data(obj, items)
         _set_list_hash(obj, h)
@@ -139,7 +151,8 @@ class FrozenList(_FrozenSequence):
     __hash__ = _Frozen.__hash__
 
 
-class FrozenTuple(_FrozenSequence):
+@final
+class FrozenTuple[T](_FrozenSequence[T]):
     """Read-only tuple."""
 
     __slots__ = ("_data", "_pf_hash", "__weakref__")
@@ -147,7 +160,7 @@ class FrozenTuple(_FrozenSequence):
     _pf_hash: bytes
 
     @classmethod
-    def _new(cls, items: tuple[Any, ...], h: bytes) -> FrozenTuple:
+    def _new(cls, items: tuple[T, ...], h: bytes) -> FrozenTuple[T]:
         obj = object.__new__(cls)
         _set_tuple_data(obj, items)
         _set_tuple_hash(obj, h)
@@ -165,26 +178,27 @@ class FrozenTuple(_FrozenSequence):
         return hash(self._data)
 
 
-class FrozenSet(_Frozen, Set[Any]):
+@final
+class FrozenSet[T](_Frozen, Set[T]):
     """Read-only set."""
 
     __slots__ = ("_data", "_pf_hash", "__weakref__")
 
-    _data: frozenset[Any]
+    _data: frozenset[T]
     _pf_hash: bytes
 
     @classmethod
-    def _new(cls, items: frozenset[Any], h: bytes) -> FrozenSet:
+    def _new(cls, items: frozenset[T], h: bytes) -> FrozenSet[T]:
         obj = object.__new__(cls)
         _set_set_data(obj, items)
         _set_set_hash(obj, h)
         return obj
 
     @classmethod
-    def _from_iterable(cls, it: Any) -> frozenset[Any]:
+    def _from_iterable[S](cls, it: Iterable[S]) -> frozenset[S]:
         return frozenset(it)
 
-    def __iter__(self) -> Iterator[Any]:
+    def __iter__(self) -> Iterator[T]:
         return iter(self._data)
 
     def __len__(self) -> int:
@@ -218,6 +232,7 @@ class FrozenModel:
     __slots__ = ("__weakref__", "_pf_hash")
 
 
+@final
 class KMBranch(_Frozen):
     """Branch of a key map: a 32-bit bitmap and one child for each set bit.
 
@@ -227,11 +242,11 @@ class KMBranch(_Frozen):
     __slots__ = ("bitmap", "children", "_pf_hash", "__weakref__")
 
     bitmap: int
-    children: tuple[Any, ...]
+    children: tuple[KMChild, ...]
     _pf_hash: bytes
 
     @classmethod
-    def _new(cls, bitmap: int, children: tuple[Any, ...], h: bytes) -> KMBranch:
+    def _new(cls, bitmap: int, children: tuple[KMChild, ...], h: bytes) -> KMBranch:
         obj = object.__new__(cls)
         _set_branch_bitmap(obj, bitmap)
         _set_branch_children(obj, children)
@@ -249,6 +264,7 @@ class KMBranch(_Frozen):
         return f"KMBranch({self._pf_hash.hex()})"
 
 
+@final
 class KMCollision(_Frozen):
     """Key map node for keys whose key hashes are equal, sorted by key."""
 
@@ -289,6 +305,9 @@ _set_branch_hash = KMBranch.__dict__["_pf_hash"].__set__
 _set_collision_entries = KMCollision.__dict__["entries"].__set__
 _set_collision_hash = KMCollision.__dict__["_pf_hash"].__set__
 set_model_hash = FrozenModel.__dict__["_pf_hash"].__set__
+
+# A child of a key map branch: an entry ``(key, value_hash)`` or another key map node.
+type KMChild = tuple[str, bytes] | KMBranch | KMCollision
 
 COLLECTION_TYPES = (FrozenDict, FrozenList, FrozenTuple, FrozenSet)
 KEYMAP_TYPES = (KMBranch, KMCollision)
