@@ -173,9 +173,9 @@ These rules come from the existing project notes in `AGENTS.md` and need confirm
 
 - By default, merging a partial value into an existing value merges dictionaries and models key by key, at every level.
 - For lists, the user selects one of these behaviors:
-  - replace the existing list with the new list
-  - merge the two lists
-  - apply an incremental update to the list (how this works is not decided)
+  - replace the existing list with the new list. This is the default.
+  - append: the result is the items of the existing list followed by the items of the new list
+  - apply an incremental update to the list (how this works is not decided, and the first version does not provide it)
 
 ### 8. Cache data in memory and in an external cache
 
@@ -218,7 +218,7 @@ These rules come from the existing project notes in `AGENTS.md` and need confirm
 - Permafrost provides a cleanup operation. The calling application runs it on its own schedule. Permafrost does not start threads or tasks on its own.
 - Permafrost also provides an optional helper that runs the cleanup operation at a fixed interval as an `asyncio` task in the application's event loop, for applications that do not want to schedule it themselves. It runs in the same thread as reads and writes, because Permafrost is not thread-safe (see [Out of scope](#out-of-scope)).
 - A separate operating-system process cannot free memory inside the application's process, so cleanup of the in-memory cache runs inside that process.
-- Permafrost records the last time each value was read, on the root node of the value. Because cleanup evicts whole values (see [References between nodes](#references-between-nodes)), it does not need a read time on every node.
+- Permafrost records the last time each value was read, in the value cache next to the root of the value. Because cleanup evicts whole values (see [References between nodes](#references-between-nodes)), it does not need a read time on every node.
 - Cleanup does two different things:
   - Eviction: it removes from the in-memory cache the values that nobody has read for a configurable time, for example 60 minutes. A later read of an evicted value fetches it from the external cache, or calls the loader.
   - Garbage collection: Python frees nodes as soon as nothing refers to them (see [What keeps nodes in memory](#what-keeps-nodes-in-memory)), so cleanup does not need to find them.

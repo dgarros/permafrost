@@ -1,0 +1,187 @@
+"""Scenarios of specs/external-cache/spec.md that do not name Redis."""
+
+import pytest
+
+from permafrost import Backend, MemoryBackend, Store, freeze, hash_of, registry
+from permafrost.types import walk
+
+
+def _forget(store, collect):
+    """Evict every value from the store and free the nodes that nothing else holds."""
+    store._values.clear()
+    store._read_at.clear()
+    collect()
+
+
+@pytest.fixture
+async def setup():
+    backend = MemoryBackend()
+    store = Store(backend)
+    await store.create_dimension("main")
+    return backend, store
+
+
+async def test_use_without_an_external_cache():
+    store = Store()
+    await store.create_dimension("main")
+    await store.set("main", "k", {"a": 1})
+    assert await store.get("main", "k") == {"a": 1}
+    assert store.backend is None
+
+
+async def test_use_a_backend_written_by_the_application(setup):
+    backend, store = setup
+    assert isinstance(backend, Backend)
+    await store.set("main", "k", {"custom-backend": [1]})
+    assert hash_of({"custom-backend": [1]}) in backend.nodes
+
+
+async def test_shared_node_written_once(setup):
+    backend, store = setup
+    await store.set("main", "a", {"shared-once": {"x": [1, 2]}, "id": 1})
+    sets = backend.set_requests
+    await store.set("main", "b", {"shared-once": {"x": [1, 2]}, "id": 2})
+    assert backend.set_requests == sets + 1
+    shared = hash_of({"x": [1, 2]})
+    assert shared in backend.nodes
+    assert shared not in backend.last_set
+    assert hash_of({"shared-once": {"x": [1, 2]}, "id": 2}) in backend.last_set
+    # The second write sent only its new root and the new key map nodes.
+    last = backend.log[-2:]
+    assert last == ["set_many", "set_root"]
+
+
+async def test_store_a_value_with_many_nodes(setup):
+    backend, store = setup
+    value = {f"n{i}": {"items": [i, {"deep": i}]} for i in range(17)}
+    sets = backend.set_requests
+    await store.set("main", "many", value)
+    assert backend.set_requests == sets + 1
+    node = freeze(value)
+    assert all(hash_of(n) in backend.nodes for n in walk(node))
+
+
+async def test_fetch_a_value_of_depth_3(setup, collect):
+    backend, store = setup
+    await store.set("main", "k", {"depth": {"two": ["three", 3]}})
+    _forget(store, collect)
+    assert registry.lookup(hash_of({"depth": {"two": ["three", 3]}})) is None
+    gets = backend.get_requests
+    assert await store.get("main", "k") == {"depth": {"two": ["three", 3]}}
+    assert backend.get_requests - gets <= 3
+
+
+async def test_nodes_already_in_memory_are_not_fetched(setup, collect):
+    backend, store = setup
+    held = freeze({"kept": ["in", "memory"]})
+    await store.set("main", "k", {"outer": held, "other": {"fetched": [1]}})
+    _forget(store, collect)
+    backend.requested.clear()
+    value = await store.get("main", "k")
+    assert value["outer"] is held
+    assert hash_of(held) not in backend.requested
+    assert hash_of({"fetched": [1]}) in backend.requested
+
+
+async def test_read_a_fetched_node_again(setup, collect):
+    backend, store = setup
+    await store.set("main", "k", {"fetched-once": [1]})
+    _forget(store, collect)
+    await store.get("main", "k")
+    gets = backend.get_requests
+    await store.get("main", "k")
+    assert backend.get_requests == gets
+
+
+async def test_expiry_extended_on_read(setup, collect):
+    backend, store = setup
+    await store.set("main", "k", {"touch-me": [1, 2]})
+    _forget(store, collect)
+    backend.touched.clear()
+    await store.get("main", "k")
+    assert hash_of({"touch-me": [1, 2]}) in backend.touched
+    assert hash_of([1, 2]) in backend.touched
+
+
+async def test_cleanup_extends_expiry_of_values_read_since_the_previous_cleanup(setup):
+    backend, store = setup
+    await store.set("main", "k", {"read-since": [1]})
+    await store.cleanup()
+    backend.touched.clear()
+    await store.get("main", "k")
+    await store.cleanup()
+    assert hash_of({"read-since": [1]}) in backend.touched
+    assert hash_of([1]) in backend.touched
+    assert store.root_hash("main") in backend.touched
+    backend.touched.clear()
+    await store.cleanup()
+    assert hash_of({"read-since": [1]}) not in backend.touched
+
+
+async def test_one_child_entry_is_missing(setup, collect):
+    backend, store = setup
+    calls = []
+
+    async def loader(d, k):
+        calls.append(k)
+        return {"partial": {"child": [1]}}
+
+    store.loader = loader
+    await store.set("main", "k", {"partial": {"child": [1]}})
+    _forget(store, collect)
+    backend.drop([hash_of({"child": [1]})])
+    assert await store.get("main", "k") == {"partial": {"child": [1]}}
+    assert calls == ["k"]
+    # The loaded nodes were written to the external cache again.
+    assert hash_of({"child": [1]}) in backend.nodes
+
+
+async def test_model_class_that_cannot_be_imported_is_a_cache_miss(setup, collect):
+    from pydantic.dataclasses import dataclass
+
+    from permafrost import FrozenModel, types
+
+    @dataclass(frozen=True, slots=True)
+    class Local(FrozenModel):
+        name: str
+
+    backend, store = setup
+    calls = []
+
+    async def loader(d, k):
+        calls.append(k)
+        return {"local": Local(name="x")}
+
+    store.loader = loader
+    await store.set("main", "k", {"local": Local(name="x")})
+    _forget(store, collect)
+    # Another process would not know the class: its path cannot be imported.
+    path = types._model_info(Local).path
+    del types._classes_by_path[path]
+    assert await store.get("main", "k") == {"local": Local(name="x")}
+    assert calls == ["k"]
+
+
+async def test_scalar_value_root_in_the_external_cache(setup, collect):
+    backend, store = setup
+    await store.set("main", "n", 12345)
+    _forget(store, collect)
+    assert await store.get("main", "n") == 12345
+
+
+async def test_loaded_value_rewrites_a_lost_node_still_held_in_memory(setup, collect):
+    backend, store = setup
+
+    async def loader(d, k):
+        return {"heal": {"child": [7]}}
+
+    store.loader = loader
+    child = freeze({"child": [7]})  # still held in memory by this process
+    await store.set("main", "k", {"heal": child})
+    _forget(store, collect)
+    root = hash_of({"heal": child})
+    backend.drop([root, hash_of(child)])
+    await store.get("main", "k")
+    # Other processes need both entries: the loaded value is written with every node.
+    assert root in backend.nodes
+    assert hash_of(child) in backend.nodes
