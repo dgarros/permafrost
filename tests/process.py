@@ -8,6 +8,7 @@ fetch them from the external cache.
 from __future__ import annotations
 
 import weakref
+from typing import Self
 
 from permafrost import keymap, registry
 from permafrost.registry import NodeListener
@@ -21,7 +22,7 @@ class Process:
         self.nodes[keymap.EMPTY._pf_hash] = keymap.EMPTY
         self._saved: list[tuple[weakref.WeakValueDictionary[bytes, object], weakref.WeakSet[NodeListener]]] = []
 
-    def __enter__(self) -> Process:
+    def __enter__(self) -> Self:
         self._saved.append((registry._nodes, registry._listeners))
         registry._nodes = self.nodes
         registry._listeners = self.listeners

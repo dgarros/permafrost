@@ -22,5 +22,5 @@ EXAMPLES = [
 
 @pytest.mark.parametrize("path", EXAMPLES)
 def test_example(path: Path) -> None:
-    result = subprocess.run([sys.executable, str(path)], capture_output=True, text=True, timeout=60)
+    result = subprocess.run([sys.executable, str(path)], capture_output=True, text=True, timeout=60, check=False)
     assert result.returncode == 0, result.stderr

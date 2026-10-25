@@ -18,7 +18,7 @@ from permafrost import (
     registry,
     set_in,
 )
-from permafrost.nodes import KMBranch, KMCollision
+from permafrost.nodes import KMBranch
 
 
 @pytest.fixture
@@ -194,7 +194,6 @@ async def test_list_keys_without_reading_values():
 
     async def loader(d, k):
         calls.append(k)
-        return None
 
     store = Store(loader=loader)
     await store.create_dimension("main")

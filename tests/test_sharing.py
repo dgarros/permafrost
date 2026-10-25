@@ -120,9 +120,8 @@ async def test_root_hash_lost_by_the_external_cache(backend, a, b):
         await store_a.create_dimension("main")
         await store_a.set("main", "k", 1)
     backend.roots.clear()
-    with b:
-        with pytest.raises(DimensionNotFoundError):
-            await Store(backend).get("main", "k")
+    with b, pytest.raises(DimensionNotFoundError):
+        await Store(backend).get("main", "k")
 
 
 async def test_root_hash_that_is_not_a_key_map(backend, a, b):
@@ -208,9 +207,8 @@ async def test_create_a_dimension_that_another_process_created(backend, a, b):
 
     with a:
         await Store(backend).create_dimension("main")
-    with b:
-        with pytest.raises(DimensionExistsError):
-            await Store(backend).create_dimension("main")
+    with b, pytest.raises(DimensionExistsError):
+        await Store(backend).create_dimension("main")
 
 
 async def test_root_hash_entry_in_redis(a):

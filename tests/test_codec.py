@@ -13,7 +13,7 @@ def test_dict_order_does_not_change_encoding():
 
 def test_set_order_does_not_change_encoding():
     a = {f"item-{i}" for i in range(50)}
-    b = set(sorted(a, reverse=True))
+    b = set(sorted(a, reverse=True))  # noqa: C414 - Exercise insertion in a different order.
     assert encode_node(freeze(a)) == encode_node(freeze(b))
 
 

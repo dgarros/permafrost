@@ -7,7 +7,8 @@ the slots through the member descriptors and so bypasses ``__setattr__``.
 
 from __future__ import annotations
 
-from collections.abc import ItemsView, Iterable, Iterator, KeysView, Mapping, Sequence, Set, ValuesView
+from collections.abc import ItemsView, Iterable, Iterator, KeysView, Mapping, Sequence, ValuesView
+from collections.abc import Set as AbstractSet
 from typing import NoReturn, Self, final, overload
 
 from .errors import ReadOnlyError
@@ -42,7 +43,7 @@ class _Frozen:
 class FrozenDict[K, V](_Frozen, Mapping[K, V]):
     """Read-only dictionary."""
 
-    __slots__ = ("_data", "_pf_hash", "__weakref__")
+    __slots__ = ("__weakref__", "_data", "_pf_hash")
 
     _data: dict[K, V]
     _pf_hash: bytes
@@ -130,7 +131,7 @@ class _FrozenSequence[T](_Frozen, Sequence[T]):
 class FrozenList[T](_FrozenSequence[T]):
     """Read-only list."""
 
-    __slots__ = ("_data", "_pf_hash", "__weakref__")
+    __slots__ = ("__weakref__", "_data", "_pf_hash")
 
     _pf_hash: bytes
 
@@ -155,7 +156,7 @@ class FrozenList[T](_FrozenSequence[T]):
 class FrozenTuple[T](_FrozenSequence[T]):
     """Read-only tuple."""
 
-    __slots__ = ("_data", "_pf_hash", "__weakref__")
+    __slots__ = ("__weakref__", "_data", "_pf_hash")
 
     _pf_hash: bytes
 
@@ -179,10 +180,10 @@ class FrozenTuple[T](_FrozenSequence[T]):
 
 
 @final
-class FrozenSet[T](_Frozen, Set[T]):
+class FrozenSet[T](_Frozen, AbstractSet[T]):
     """Read-only set."""
 
-    __slots__ = ("_data", "_pf_hash", "__weakref__")
+    __slots__ = ("__weakref__", "_data", "_pf_hash")
 
     _data: frozenset[T]
     _pf_hash: bytes
@@ -239,7 +240,7 @@ class KMBranch(_Frozen):
     A child is either an entry ``(key, value_hash)`` or another key map node.
     """
 
-    __slots__ = ("bitmap", "children", "_pf_hash", "__weakref__")
+    __slots__ = ("__weakref__", "_pf_hash", "bitmap", "children")
 
     bitmap: int
     children: tuple[KMChild, ...]
@@ -268,7 +269,7 @@ class KMBranch(_Frozen):
 class KMCollision(_Frozen):
     """Key map node for keys whose key hashes are equal, sorted by key."""
 
-    __slots__ = ("entries", "_pf_hash", "__weakref__")
+    __slots__ = ("__weakref__", "_pf_hash", "entries")
 
     entries: tuple[tuple[str, bytes], ...]
     _pf_hash: bytes

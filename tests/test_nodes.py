@@ -1,6 +1,8 @@
 import weakref
+from dataclasses import FrozenInstanceError
 
 import pytest
+from pydantic import ValidationError
 
 from permafrost import FrozenDict, FrozenList, FrozenSet, FrozenTuple, ReadOnlyError, freeze
 
@@ -56,10 +58,10 @@ def test_set_cannot_change():
 
 def test_model_field_cannot_change():
     d = freeze(Device(name="r1"))
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         d.name = "r2"  # ty: ignore[invalid-assignment]
     m = freeze(Site(name="s"))
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError, match="frozen_instance"):
         m.name = "t"  # ty: ignore[invalid-assignment]
     with pytest.raises(AttributeError):
         m.devices.append("x")
