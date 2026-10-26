@@ -41,7 +41,13 @@ line-length = 120
 
 [tool.ruff.lint]
 # ANN401 reports `Any` as a whole annotation; TID251 reports every import of `Any`, including nested uses.
-extend-select = ["ANN401", "TID251"]
+# D1 reports a public module, class, method or function that has no docstring. It skips names that start with `_`.
+extend-select = ["ANN401", "TID251", "D1"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D1"]
+"examples/**" = ["D1"]
+"benchmarks/**" = ["D1"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "typing.Any" = { msg = "Declare an exact type, or `object` where the type is open." }

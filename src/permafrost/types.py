@@ -41,6 +41,7 @@ _side_hashes: dict[int, bytes] = {}
 
 
 def _attach_side_hash(obj: object, h: bytes) -> None:
+    """Record the hash of a node that has no ``_pf_hash`` slot, until Python frees the node."""
     key = id(obj)
     _side_hashes[key] = h
     weakref.finalize(obj, _side_hashes.pop, key, None)
@@ -58,12 +59,14 @@ def node_hash(node: object) -> bytes:
 
 
 def is_node(value: object) -> bool:
+    """Return whether ``value`` is a node: a read-only collection, a key map node, or an object with a recorded hash."""
     if type(value) in _BUILTIN_NODE_TYPES:
         return True
     return getattr(value, "_pf_hash", None) is not None or id(value) in _side_hashes
 
 
 def is_scalar(value: object) -> TypeGuard[Scalar]:
+    """Return whether ``value`` is a scalar, which is stored inside its parent node rather than as a node."""
     return type(value) in SCALAR_TYPES
 
 
@@ -73,6 +76,13 @@ def is_scalar(value: object) -> TypeGuard[Scalar]:
 
 @dataclass(frozen=True, slots=True)
 class _ModelInfo:
+    """What Permafrost needs to store instances of a dataclass or Pydantic model class.
+
+    ``tag`` is the node tag of the class, ``fields`` the field names in order,
+    ``path`` the name written in the encoding, and ``slot`` whether the class
+    has a ``_pf_hash`` slot.
+    """
+
     cls: type[object]
     tag: int
     fields: tuple[str, ...]
@@ -85,15 +95,20 @@ _classes_by_path: dict[str, type[object]] = {}
 
 
 class _DataclassParams(Protocol):
+    """The ``__dataclass_params__`` attribute of a dataclass, as far as Permafrost reads it."""
+
     frozen: bool
 
 
 @runtime_checkable
 class _Dataclass(Protocol):
+    """A dataclass, recognised by its ``__dataclass_params__`` attribute."""
+
     __dataclass_params__: _DataclassParams
 
 
 def _check_weakref(cls: type) -> None:
+    """Raise ``UnsupportedTypeError`` when instances of ``cls`` do not support weak references."""
     if cls.__weakrefoffset__ == 0:
         raise UnsupportedTypeError(
             f"{cls.__qualname__} does not support weak references: inherit from permafrost.FrozenModel"
@@ -101,6 +116,12 @@ def _check_weakref(cls: type) -> None:
 
 
 def _model_info(cls: type[object], path: str | None = None) -> _ModelInfo | None:
+    """Return the model information of ``cls``, or ``None`` when it is not a dataclass or a Pydantic model.
+
+    The result is cached by class. Passing ``path`` registers the class under
+    that name. Raises ``UnsupportedTypeError`` when the class is not frozen, or
+    is a dataclass whose instances do not support weak references.
+    """
     if cls in _model_infos and path is None:
         return _model_infos[cls]
     path = path or f"{cls.__module__}:{cls.__qualname__}"
@@ -138,6 +159,7 @@ def register_class[M](cls: type[M], path: str | None = None) -> None:
 
 
 def _class_for_path(path: str) -> type[object]:
+    """Return the model class registered under ``path``, or import it by its ``module:qualname`` name."""
     cls = _classes_by_path.get(path)
     if cls is None:
         module_name, _, qualname = path.partition(":")
@@ -152,6 +174,7 @@ def _class_for_path(path: str) -> type[object]:
 
 
 def _build_model(info: _ModelInfo, values: tuple[object, ...], h: bytes) -> object:
+    """Create a model instance with these field values and hash ``h``, without its constructor or validation."""
     cls = info.cls
     obj = object.__new__(cls)
     if info.tag == codec.TAG_DATACLASS:
@@ -167,6 +190,7 @@ def _build_model(info: _ModelInfo, values: tuple[object, ...], h: bytes) -> obje
 
 
 def _attach_model_hash(info: _ModelInfo, obj: object, h: bytes) -> None:
+    """Record the hash ``h`` of a model node, in its slot when the class has one."""
     if info.slot:
         set_model_hash(obj, h)
     else:
@@ -174,10 +198,12 @@ def _attach_model_hash(info: _ModelInfo, obj: object, h: bytes) -> None:
 
 
 def model_values(info: _ModelInfo, obj: object) -> tuple[object, ...]:
+    """Return the field values of the model ``obj``, in field order."""
     return tuple(getattr(obj, name) for name in info.fields)
 
 
 def model_info_of(obj: object) -> _ModelInfo | None:
+    """Return the model information of the class of ``obj``, or ``None`` when it is not a model."""
     return _model_info(type(obj))
 
 
@@ -197,6 +223,7 @@ def make_model(info: _ModelInfo, values: tuple[object, ...], original: object = 
 
 
 def _freeze_model(value: object, info: _ModelInfo) -> object:
+    """Return the read-only form of a model: an instance of its class whose fields hold read-only values."""
     if is_node(value):
         return value
     if isinstance(value, BaseModel) and value.__pydantic_extra__:
@@ -245,10 +272,15 @@ def register_type[T, E](
 
 
 def _handler_inner(handler: TypeHandler[object, object], obj: object) -> object:
+    """Return the frozen form of what ``handler`` encodes ``obj`` to."""
     return freeze(handler.encode(obj))
 
 
 def _decode_handled(handler: TypeHandler[object, object], inner: object, h: bytes) -> object:
+    """Return the object that ``handler`` decodes from ``inner``, with hash ``h``.
+
+    Raises ``UnsupportedTypeError`` when the object does not support weak references.
+    """
     obj = handler.decode(inner)
     try:
         weakref.ref(obj)
@@ -261,6 +293,7 @@ def _decode_handled(handler: TypeHandler[object, object], inner: object, h: byte
 
 
 def _freeze_handled(value: object, handler: TypeHandler[object, object]) -> object:
+    """Return the read-only node for an object of a type with a registered handler."""
     if is_node(value):
         return value
     inner = _handler_inner(handler, value)
@@ -276,6 +309,7 @@ def _freeze_handled(value: object, handler: TypeHandler[object, object]) -> obje
 
 
 def make_dict[K, V](data: dict[K, V]) -> FrozenDict[K, V]:
+    """Return the dictionary node holding ``data``, whose keys and values must be frozen, reusing an existing node."""
     h = codec.digest(codec.encode_mapping(codec.TAG_DICT, data.items(), node_hash))
     node = registry.lookup(h, FrozenDict)
     if node is not None:
@@ -284,6 +318,7 @@ def make_dict[K, V](data: dict[K, V]) -> FrozenDict[K, V]:
 
 
 def make_list[T](items: tuple[T, ...]) -> FrozenList[T]:
+    """Return the list node holding ``items``, which must be frozen, reusing an existing node with the same hash."""
     h = codec.digest(codec.encode_sequence(codec.TAG_LIST, items, node_hash))
     node = registry.lookup(h, FrozenList)
     if node is not None:
@@ -292,6 +327,7 @@ def make_list[T](items: tuple[T, ...]) -> FrozenList[T]:
 
 
 def make_tuple[T](items: tuple[T, ...]) -> FrozenTuple[T]:
+    """Return the tuple node holding ``items``, which must be frozen, reusing an existing node with the same hash."""
     h = codec.digest(codec.encode_sequence(codec.TAG_TUPLE, items, node_hash))
     node = registry.lookup(h, FrozenTuple)
     if node is not None:
@@ -300,6 +336,7 @@ def make_tuple[T](items: tuple[T, ...]) -> FrozenTuple[T]:
 
 
 def make_set[T](items: frozenset[T]) -> FrozenSet[T]:
+    """Return the set node holding ``items``, which must be frozen, reusing an existing node with the same hash."""
     h = codec.digest(codec.encode_set(items, node_hash))
     node = registry.lookup(h, FrozenSet)
     if node is not None:
@@ -308,10 +345,12 @@ def make_set[T](items: frozenset[T]) -> FrozenSet[T]:
 
 
 def _freeze_mapping[K, V](value: Mapping[K, V]) -> FrozenDict[object, object]:
+    """Return the dictionary node with the frozen form of each key and value of ``value``."""
     return make_dict({freeze(k): freeze(v) for k, v in value.items()})
 
 
 def _freeze_items(value: Iterable[object]) -> tuple[object, ...]:
+    """Return the frozen form of each item, in order."""
     return tuple(freeze(v) for v in value)
 
 
@@ -450,6 +489,7 @@ def walk(root: object) -> Iterator[object]:
 
 
 def _scalars_size(items: Iterable[object]) -> int:
+    """Return the memory, in bytes, of the scalars among ``items``."""
     return sum(sys.getsizeof(x) for x in items if type(x) in SCALAR_TYPES)
 
 
@@ -472,22 +512,26 @@ def estimate_size(root: object) -> int:
 
 
 def _malformed(what: str) -> ValueError:
+    """Return the ``ValueError`` for a node from the external cache whose payload does not have the expected shape."""
     return ValueError(f"malformed node in the external cache: {what}")
 
 
 def _field(payload: Sequence[object], index: int) -> object:
+    """Return item ``index`` of a payload, or raise ``ValueError`` when the payload is too short."""
     if index >= len(payload):
         raise _malformed(f"missing field {index}")
     return payload[index]
 
 
 def _as_list(value: object) -> Sequence[object]:
+    """Return ``value`` when it is a list, or raise ``ValueError``."""
     if type(value) is not list:
         raise _malformed(f"expected an array, found {type(value).__qualname__}")
     return value
 
 
 def _as_pair(value: object) -> tuple[object, object]:
+    """Return the two items of ``value`` when it is a list of two, or raise ``ValueError``."""
     items = _as_list(value)
     if len(items) != 2:
         raise _malformed(f"expected a pair, found {len(items)} items")
@@ -495,18 +539,21 @@ def _as_pair(value: object) -> tuple[object, object]:
 
 
 def _as_str(value: object) -> str:
+    """Return ``value`` when it is a string, or raise ``ValueError``."""
     if type(value) is not str:
         raise _malformed(f"expected a string, found {type(value).__qualname__}")
     return value
 
 
 def _as_int(value: object) -> int:
+    """Return ``value`` when it is an integer, or raise ``ValueError``."""
     if type(value) is not int:
         raise _malformed(f"expected an integer, found {type(value).__qualname__}")
     return value
 
 
 def _as_bytes(value: object) -> bytes:
+    """Return ``value`` when it is ``bytes``, or raise ``ValueError``."""
     if type(value) is not bytes:
         raise _malformed(f"expected bytes, found {type(value).__qualname__}")
     return value
@@ -521,9 +568,11 @@ def build(h: bytes, payload: Sequence[object], resolve: Callable[[bytes], object
     """
 
     def r(item: object) -> object:
+        """Return the child node for a ``Ref``, or ``item`` itself when it is a scalar."""
         return resolve(item.hash) if type(item) is Ref else item
 
     def km_child(item: object) -> KMChild:
+        """Return a key map child: an entry ``(key, value_hash)``, or the branch or collision node of a ``Ref``."""
         if type(item) is not Ref:
             key, value_hash = _as_pair(item)
             return _as_str(key), _as_bytes(value_hash)

@@ -50,9 +50,11 @@ class Ref:
     __slots__ = ("hash",)
 
     def __init__(self, h: bytes) -> None:
+        """Reference the child node with hash ``h``."""
         self.hash = h
 
     def __repr__(self) -> str:
+        """Return ``Ref(<hex hash>)``."""
         return f"Ref({self.hash.hex()})"
 
 
@@ -64,14 +66,17 @@ type HashOfNode = Callable[[object], bytes]
 
 
 def digest(data: bytes) -> bytes:
+    """Return the 16-byte BLAKE2b hash of encoded node bytes."""
     return hashlib.blake2b(data, digest_size=HASH_SIZE).digest()
 
 
 def _pack(obj: Packable) -> bytes:
+    """Encode ``obj`` with msgpack, writing ``bytes`` as msgpack binary."""
     return msgpack.packb(obj, use_bin_type=True)
 
 
 def _no_children(item: object) -> bytes:
+    """Raise ``TypeError``: the root of a scalar value has no child node to hash."""
     raise TypeError(f"a scalar root has no child node, found {type(item).__qualname__}")
 
 
@@ -91,6 +96,7 @@ def encode_item(item: object, hash_of_node: HashOfNode) -> Packable:
 
 
 def encode_scalar_root(value: Scalar) -> bytes:
+    """Encode a scalar that is the whole value, as a node of its own."""
     return _pack([TAG_SCALAR, encode_item(value, _no_children)])
 
 
@@ -105,24 +111,32 @@ def encode_mapping(tag: int, pairs: Iterable[tuple[object, object]], hash_of_nod
 
 
 def encode_sequence(tag: int, items: Iterable[object], hash_of_node: HashOfNode) -> bytes:
+    """Encode the items of a list or tuple node, in order, under ``tag``."""
     return _pack([tag, [encode_item(i, hash_of_node) for i in items]])
 
 
 def encode_set(items: Iterable[object], hash_of_node: HashOfNode) -> bytes:
+    """Encode the items of a set node, sorted by their encoded bytes so the same set always gives the same bytes."""
     encoded = [encode_item(i, hash_of_node) for i in items]
     encoded.sort(key=_pack)
     return _pack([TAG_SET, encoded])
 
 
 def encode_model(tag: int, path: str, values: Iterable[object], hash_of_node: HashOfNode) -> bytes:
+    """Encode a dataclass or Pydantic model node: its class path and its field values in field order."""
     return _pack([tag, path, [encode_item(v, hash_of_node) for v in values]])
 
 
 def encode_handler(name: str, inner: object, hash_of_node: HashOfNode) -> bytes:
+    """Encode a value converted by the type handler named ``name``, from its converted form ``inner``."""
     return _pack([TAG_HANDLER, name, encode_item(inner, hash_of_node)])
 
 
 def encode_km_branch(bitmap: int, children: Iterable[KMChild], hash_of_node: HashOfNode) -> bytes:
+    """Encode a key map branch: its bitmap of used slots and its children.
+
+    An entry child is written as ``[key, value_hash]`` and a branch or collision child as a reference to its hash.
+    """
     out: list[Packable] = []
     for child in children:
         if isinstance(child, tuple):
@@ -133,10 +147,12 @@ def encode_km_branch(bitmap: int, children: Iterable[KMChild], hash_of_node: Has
 
 
 def encode_km_collision(entries: Iterable[tuple[str, bytes]]) -> bytes:
+    """Encode a key map collision node from its ``(key, value_hash)`` entries."""
     return _pack([TAG_KM_COLLISION, [[k, v] for k, v in entries]])
 
 
 def _ext_hook(code: int, data: bytes) -> object:
+    """Decode a msgpack extension value: a child reference, a date, a datetime or a large integer."""
     if code == EXT_REF:
         return Ref(data)
     if code == EXT_DATETIME:

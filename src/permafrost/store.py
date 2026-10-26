@@ -71,6 +71,10 @@ class Store[V]:
         memory_limit: int | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        """Create a store with no dimension.
+
+        With a backend, the store registers itself as a node listener, so it knows which nodes it still has to write.
+        """
         self.backend = backend
         self.loader = loader
         self.idle_time = idle_time
@@ -94,6 +98,7 @@ class Store[V]:
             registry.add_listener(self)
 
     def node_created(self, h: bytes, node: object) -> None:
+        """Record a node created in this process as one to write to the backend."""
         self._pending[h] = node
 
     # ------------------------------------------------------------------
@@ -248,6 +253,7 @@ class Store[V]:
             raise RuntimeError("the cleanup task is already running")
 
         async def run() -> None:
+            """Await ``cleanup()`` every ``interval`` seconds and log any error, so the task keeps running."""
             while True:
                 await asyncio.sleep(interval)
                 try:
@@ -278,6 +284,7 @@ class Store[V]:
     # Internals
 
     def _typed(self, value: object) -> V:
+        """Return ``value`` with the type ``V`` that the application declared."""
         # ``V`` is the application's declaration of what it stores under its
         # keys. The caches hold nodes without a type, and ``freeze()`` cannot
         # map a type parameter to its read-only form, so every value that the
@@ -285,12 +292,19 @@ class Store[V]:
         return cast(V, value)
 
     def _lock(self, dimension: str) -> asyncio.Lock:
+        """Return the lock of a dimension, creating it on first use."""
         lock = self._locks.get(dimension)
         if lock is None:
             lock = self._locks[dimension] = asyncio.Lock()
         return lock
 
     def _cache(self, h: bytes, value: object) -> None:
+        """Put a value in the value cache as the most recently read one.
+
+        With a memory limit, the estimated size of a new value is added to the
+        total. With a backend, the value is recorded as read since the previous
+        cleanup.
+        """
         if h in self._values:
             del self._values[h]
             del self._read_at[h]
@@ -304,11 +318,18 @@ class Store[V]:
             self._read_since_cleanup.add(h)
 
     def _evict(self, h: bytes) -> None:
+        """Remove a value from the value cache and subtract its estimated size."""
         del self._values[h]
         del self._read_at[h]
         self._total_size -= self._sizes.pop(h, 0)
 
     async def _root(self, dimension: str) -> KMBranch:
+        """Return the key map root of a dimension.
+
+        When the dimension is not in memory, read its root hash from the
+        backend and fetch its key map. Raise ``DimensionNotFoundError`` when
+        neither holds it.
+        """
         root = self._dims.get(dimension)
         if root is not None:
             return root
@@ -320,6 +341,7 @@ class Store[V]:
         return self._dims.setdefault(dimension, await self._fetch_root(dimension, h))
 
     async def _fetch_root(self, dimension: str, h: bytes) -> KMBranch:
+        """Fetch the key map with root hash ``h``. Raise ``DimensionNotFoundError`` when it is lost or not a key map."""
         root = await self._fetch(h)
         if root is _MISSING:
             raise DimensionNotFoundError(dimension, "has key map nodes that the external cache lost")
@@ -328,6 +350,14 @@ class Store[V]:
         return root
 
     async def _value(self, dimension: str, key: str, vh: bytes, *, locked: bool = False) -> object:
+        """Return the value with hash ``vh`` stored under ``key`` in ``dimension``.
+
+        Look in the value cache, then the registry, then the backend, then call
+        the loader. When the loaded value has another hash, store it under
+        ``key``, unless ``locked`` says that the caller holds the lock and
+        stores its own result. Raise ``CacheMissError`` when no cache holds the
+        value and there is no loader.
+        """
         value = self._values.get(vh, _MISSING)
         if value is _MISSING:
             value = registry.lookup(vh, object)
@@ -426,6 +456,7 @@ class Store[V]:
         built: dict[bytes, object] = {}
 
         def resolve(h: bytes) -> object:
+            """Return the node with hash ``h``: from the registry, or built from its fetched payload."""
             node = registry.lookup(h, object)
             if node is not None:
                 return node
@@ -441,6 +472,7 @@ class Store[V]:
             return _MISSING
 
     async def _extend_expiry(self) -> None:
+        """Extend the expiry time of the values read since the previous cleanup and of the key maps in memory."""
         assert self.backend is not None
         hashes: set[bytes] = set()
         for h in self._read_since_cleanup:

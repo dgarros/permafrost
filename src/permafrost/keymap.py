@@ -27,14 +27,17 @@ Kind = Literal["added", "removed", "changed"]
 
 
 def key_hash(key: str) -> int:
+    """Return the 128-bit BLAKE2b hash of ``key`` as an integer."""
     return int.from_bytes(hashlib.blake2b(key.encode(), digest_size=16).digest())
 
 
 def _slot(kh: int, depth: int) -> int:
+    """Return the slot, from 0 to 31, that the key with hash ``kh`` takes in a branch at ``depth``."""
     return (kh >> (128 - BITS * (depth + 1))) & 31
 
 
 def make_branch(bitmap: int, children: tuple[KMChild, ...]) -> KMBranch:
+    """Return the branch node with these slots and children, reusing a registered node with the same hash."""
     h = codec.digest(codec.encode_km_branch(bitmap, children, node_hash))
     node = registry.lookup(h, KMBranch)
     if node is not None:
@@ -43,6 +46,7 @@ def make_branch(bitmap: int, children: tuple[KMChild, ...]) -> KMBranch:
 
 
 def make_collision(entries: tuple[Entry, ...]) -> KMCollision:
+    """Return the collision node with these entries sorted by key, reusing a registered node with the same hash."""
     entries = tuple(sorted(entries))
     h = codec.digest(codec.encode_km_collision(entries))
     node = registry.lookup(h, KMCollision)
@@ -52,6 +56,7 @@ def make_collision(entries: tuple[Entry, ...]) -> KMCollision:
 
 
 def empty() -> KMBranch:
+    """Return the key map that holds no key."""
     return make_branch(0, ())
 
 
@@ -88,6 +93,7 @@ def set(root: KMBranch, key: str, value_hash: bytes) -> KMBranch:
 
 
 def _set(node: KMBranch | KMCollision, key: str, kh: int, vh: bytes, depth: int) -> KMBranch | KMCollision:
+    """Return ``node`` with ``key`` set to value hash ``vh``, or ``node`` itself when nothing changes."""
     if type(node) is KMCollision:
         entries = dict(node.entries)
         if entries.get(key) == vh:
@@ -183,6 +189,7 @@ def items(root: KMChild) -> Iterator[Entry]:
 
 
 def keys(root: KMBranch) -> Iterator[str]:
+    """Yield each key, in no defined order."""
     for key, _ in items(root):
         yield key
 
@@ -208,6 +215,10 @@ def diff(a: KMBranch, b: KMBranch) -> list[tuple[str, Kind]]:
 
 
 def _diff_nodes(a: KMChild | None, b: KMChild | None, out: list[tuple[str, Kind]]) -> None:
+    """Append to ``out`` each key whose value hash differs between the subtrees ``a`` and ``b``.
+
+    ``None`` stands for an empty slot. Branches are compared slot by slot; any other pair is compared entry by entry.
+    """
     if a is b:
         return
     if type(a) is KMBranch and type(b) is KMBranch:
@@ -236,12 +247,14 @@ def _diff_nodes(a: KMChild | None, b: KMChild | None, out: list[tuple[str, Kind]
 
 
 def _child(node: KMBranch, bit: int) -> KMChild | None:
+    """Return the child in the slot of ``bit``, or ``None`` when the slot is empty."""
     if not node.bitmap & bit:
         return None
     return node.children[(node.bitmap & (bit - 1)).bit_count()]
 
 
 def _entries(node: KMChild | None) -> Iterator[Entry]:
+    """Yield each entry below ``node``, or none when ``node`` is ``None``."""
     if node is None:
         return iter(())
     return items(node)

@@ -17,7 +17,11 @@ from typing import Protocol
 
 
 class NodeListener(Protocol):
-    def node_created(self, h: bytes, node: object) -> None: ...
+    """An object told about each node that Permafrost creates."""
+
+    def node_created(self, h: bytes, node: object) -> None:
+        """Receive a node created with hash ``h``."""
+        ...
 
 
 _nodes: weakref.WeakValueDictionary[bytes, object] = weakref.WeakValueDictionary()
@@ -25,6 +29,7 @@ _listeners: weakref.WeakSet[NodeListener] = weakref.WeakSet()
 
 
 def _checked[T](h: bytes, node: object, cls: type[T]) -> T:
+    """Return ``node`` when it is an instance of ``cls``, or raise ``TypeError``."""
     # A hash identifies an encoding, and every encoding starts with the type
     # tag, so a node of another class under the same hash is a bug.
     if not isinstance(node, cls):
@@ -51,14 +56,17 @@ def add[T](h: bytes, node: T, *, created: bool = True) -> T:
 
 
 def add_listener(listener: NodeListener) -> None:
+    """Tell ``listener`` about each node created from now on. The registry keeps only a weak reference to it."""
     _listeners.add(listener)
 
 
 def remove_listener(listener: NodeListener) -> None:
+    """Stop telling ``listener`` about created nodes."""
     _listeners.discard(listener)
 
 
 def items() -> list[tuple[bytes, object]]:
+    """Return each ``(hash, node)`` pair held in the process."""
     return list(_nodes.items())
 
 
