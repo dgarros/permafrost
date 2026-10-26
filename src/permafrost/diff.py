@@ -43,6 +43,7 @@ def diff(a: object, b: object) -> list[DiffEntry]:
 
 
 def _same(a: object, b: object) -> bool:
+    """Return whether two frozen values are equal: by value for scalars, by hash for nodes."""
     if a is b:
         return True
     ta = type(a)
@@ -54,6 +55,10 @@ def _same(a: object, b: object) -> bool:
 
 
 def _diff(a: object, b: object, path: tuple[Step, ...], out: list[DiffEntry]) -> None:
+    """Append to ``out`` the differences between the frozen values ``a`` and ``b`` found at ``path``.
+
+    When the two values are not of the same type, or are scalars, the whole path is one changed entry.
+    """
     if _same(a, b):
         return
     if type(a) is not type(b) or type(a) in SCALAR_TYPES:

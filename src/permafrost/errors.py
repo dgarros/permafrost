@@ -23,6 +23,7 @@ class KeyNotFoundError(PermafrostError, LookupError):
     """Raised when a dimension does not hold a key."""
 
     def __init__(self, dimension: str, key: str) -> None:
+        """Record the dimension and the key that was not found."""
         super().__init__(f"key {key!r} not found in dimension {dimension!r}")
         self.dimension = dimension
         self.key = key
@@ -32,6 +33,7 @@ class DimensionNotFoundError(PermafrostError, LookupError):
     """Raised when a dimension is neither in memory nor in the external cache."""
 
     def __init__(self, dimension: str, reason: str = "not found") -> None:
+        """Record the dimension, with ``reason`` ending the message."""
         super().__init__(f"dimension {dimension!r} {reason}")
         self.dimension = dimension
 
@@ -40,6 +42,7 @@ class DimensionExistsError(PermafrostError):
     """Raised when creating a dimension with a name that already exists."""
 
     def __init__(self, dimension: str) -> None:
+        """Record the name of the dimension that already exists."""
         super().__init__(f"dimension {dimension!r} already exists")
         self.dimension = dimension
 
@@ -48,6 +51,7 @@ class CacheMissError(PermafrostError, LookupError):
     """Raised when a value is in no cache and no loader is registered."""
 
     def __init__(self, dimension: str, key: str) -> None:
+        """Record the dimension and the key whose value could not be found."""
         super().__init__(f"value of key {key!r} in dimension {dimension!r} is in no cache and no loader is registered")
         self.dimension = dimension
         self.key = key

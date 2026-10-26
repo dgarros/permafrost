@@ -27,12 +27,14 @@ type Path = Sequence[Step]
 
 
 def _field_name(info: _ModelInfo, node: object, step: Step) -> str:
+    """Return ``step`` when it names a field of the model ``node``, or raise ``PathError``."""
     if not isinstance(step, str) or step not in info.fields:
         raise PathError(f"{type(node).__qualname__} has no field {step!r}")
     return step
 
 
 def _index(node: FrozenList[object] | FrozenTuple[object], step: Step) -> int:
+    """Return ``step`` when it is an integer index within ``node``, or raise ``PathError``."""
     if type(step) is not int:
         raise PathError(f"index {step!r} of a {type(node).__name__} must be an integer")
     if not -len(node) <= step < len(node):
@@ -41,6 +43,7 @@ def _index(node: FrozenList[object] | FrozenTuple[object], step: Step) -> int:
 
 
 def _child(node: object, step: Step) -> object:
+    """Return the child of ``node`` at ``step``, or raise ``PathError`` when ``node`` has no such child."""
     if isinstance(node, FrozenDict):
         try:
             return node[step]
@@ -120,6 +123,7 @@ def set_in(value: object, path: Path, new: object) -> object:
 
 
 def _delete(parent: object, step: Step) -> object:
+    """Return ``parent`` without the dictionary key or list or tuple item at ``step``, or raise ``PathError``."""
     if isinstance(parent, FrozenDict):
         if step not in parent:
             raise PathError(f"key {step!r} not found")
@@ -183,6 +187,7 @@ def merge(value: object, partial: object, *, lists: ListMerge = "replace") -> ob
 
 
 def _merge(base: object, part: object, lists: ListMerge) -> object:
+    """Return the frozen ``base`` with the unfrozen ``part`` merged into it, as described in ``merge``."""
     if isinstance(base, FrozenDict) and isinstance(part, Mapping):
         data: dict[object, object] = dict(base._data)
         for k, v in part.items():

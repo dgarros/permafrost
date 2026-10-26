@@ -10,3 +10,4 @@ Permafrost is a Python library that stores deeply nested, read-only data across 
 - Source code is in `src/permafrost/`.
 - Run the tests with `uv run pytest`. They include the type check, which you can also run alone with `uv run ty check`.
 - Lint and format with `uv run ruff check` and `uv run ruff format`. Do not use `typing.Any`: declare an exact type, or `object` where the type is open.
+- Give every function, method and class in `src/permafrost/` a docstring, including internal ones whose names start with `_`. `ruff check` reports a missing docstring on public names only, so check internal ones yourself.

@@ -15,10 +15,13 @@ from .errors import ReadOnlyError
 
 
 def _read_only(self: object, *args: object) -> NoReturn:
+    """Raise ``ReadOnlyError``: used for every method that would change a node."""
     raise ReadOnlyError(f"{type(self).__name__} is read-only")
 
 
 class _Frozen:
+    """Base class of the read-only node classes: refuses attribute changes, copies and pickling."""
+
     __slots__ = ()
 
     _pf_hash: bytes
@@ -27,15 +30,19 @@ class _Frozen:
     __delattr__ = _read_only
 
     def __hash__(self) -> int:
+        """Return the first 8 bytes of the content hash as an integer."""
         return int.from_bytes(self._pf_hash[:8])
 
     def __copy__(self) -> Self:
+        """Return the node itself: a read-only node needs no copy."""
         return self
 
     def __deepcopy__(self, memo: object) -> Self:
+        """Return the node itself: a read-only node needs no copy."""
         return self
 
     def __reduce__(self) -> NoReturn:
+        """Raise ``TypeError``: nodes cannot be pickled."""
         raise TypeError(f"{type(self).__name__} cannot be pickled")
 
 
@@ -50,30 +57,38 @@ class FrozenDict[K, V](_Frozen, Mapping[K, V]):
 
     @classmethod
     def _new(cls, data: dict[K, V], h: bytes) -> FrozenDict[K, V]:
+        """Create a dictionary node holding ``data``, with content hash ``h``. Do not change ``data`` afterwards."""
         obj = object.__new__(cls)
         _set_dict_data(obj, data)
         _set_dict_hash(obj, h)
         return obj
 
     def __getitem__(self, key: K) -> V:
+        """Return the value stored under ``key``."""
         return self._data[key]
 
     def __iter__(self) -> Iterator[K]:
+        """Iterate over the keys, in insertion order."""
         return iter(self._data)
 
     def __len__(self) -> int:
+        """Return the number of keys."""
         return len(self._data)
 
     def __contains__(self, key: object) -> bool:
+        """Return whether ``key`` is in the dictionary."""
         return key in self._data
 
     def keys(self) -> KeysView[K]:
+        """Return a view of the keys."""
         return self._data.keys()
 
     def values(self) -> ValuesView[V]:
+        """Return a view of the values."""
         return self._data.values()
 
     def items(self) -> ItemsView[K, V]:
+        """Return a view of the ``(key, value)`` pairs."""
         return self._data.items()
 
     @overload
@@ -81,9 +96,11 @@ class FrozenDict[K, V](_Frozen, Mapping[K, V]):
     @overload
     def get[D](self, key: object, default: D, /) -> V | D: ...
     def get(self, key: object, default: object = None, /) -> object:
+        """Return the value stored under ``key``, or ``default`` when the key is absent."""
         return self._data.get(key, default)
 
     def __eq__(self, other: object) -> bool:
+        """Compare by content hash with another ``FrozenDict``, and by content with any other mapping."""
         if isinstance(other, FrozenDict):
             return self._pf_hash == other._pf_hash
         if isinstance(other, Mapping):
@@ -93,13 +110,17 @@ class FrozenDict[K, V](_Frozen, Mapping[K, V]):
     __hash__ = _Frozen.__hash__
 
     def __or__(self, other: object) -> NoReturn:
+        """Raise ``ReadOnlyError``: use ``permafrost.merge()`` to combine dictionaries."""
         raise ReadOnlyError("FrozenDict is read-only, use permafrost.merge()")
 
     def __repr__(self) -> str:
+        """Return ``FrozenDict({...})``."""
         return f"FrozenDict({self._data!r})"
 
 
 class _FrozenSequence[T](_Frozen, Sequence[T]):
+    """Base class of ``FrozenList`` and ``FrozenTuple``: a read-only sequence stored as a tuple."""
+
     __slots__ = ()
 
     _data: tuple[T, ...]
@@ -109,21 +130,27 @@ class _FrozenSequence[T](_Frozen, Sequence[T]):
     @overload
     def __getitem__(self, index: slice) -> tuple[T, ...]: ...
     def __getitem__(self, index: int | slice) -> T | tuple[T, ...]:
+        """Return the item at ``index``, or a tuple of items for a slice."""
         return self._data[index]
 
     def __iter__(self) -> Iterator[T]:
+        """Iterate over the items, in order."""
         return iter(self._data)
 
     def __len__(self) -> int:
+        """Return the number of items."""
         return len(self._data)
 
     def __contains__(self, item: object) -> bool:
+        """Return whether ``item`` is in the sequence."""
         return item in self._data
 
     def __reversed__(self) -> Iterator[T]:
+        """Iterate over the items, last first."""
         return reversed(self._data)
 
     def __repr__(self) -> str:
+        """Return the class name and the items as a list, such as ``FrozenList([...])``."""
         return f"{type(self).__name__}({list(self._data)!r})"
 
 
@@ -137,12 +164,14 @@ class FrozenList[T](_FrozenSequence[T]):
 
     @classmethod
     def _new(cls, items: tuple[T, ...], h: bytes) -> FrozenList[T]:
+        """Create a list node holding ``items``, with content hash ``h``."""
         obj = object.__new__(cls)
         _set_list_data(obj, items)
         _set_list_hash(obj, h)
         return obj
 
     def __eq__(self, other: object) -> bool:
+        """Compare by content hash with another ``FrozenList``, and item by item with a ``list``."""
         if isinstance(other, FrozenList):
             return self._pf_hash == other._pf_hash
         if isinstance(other, list):
@@ -162,12 +191,14 @@ class FrozenTuple[T](_FrozenSequence[T]):
 
     @classmethod
     def _new(cls, items: tuple[T, ...], h: bytes) -> FrozenTuple[T]:
+        """Create a tuple node holding ``items``, with content hash ``h``."""
         obj = object.__new__(cls)
         _set_tuple_data(obj, items)
         _set_tuple_hash(obj, h)
         return obj
 
     def __eq__(self, other: object) -> bool:
+        """Compare by content hash with another ``FrozenTuple``, and by content with a ``tuple``."""
         if isinstance(other, FrozenTuple):
             return self._pf_hash == other._pf_hash
         if isinstance(other, tuple):
@@ -175,6 +206,7 @@ class FrozenTuple[T](_FrozenSequence[T]):
         return NotImplemented
 
     def __hash__(self) -> int:
+        """Return the hash of the items as a built-in tuple."""
         # Same hash as the built-in tuple, so that a FrozenTuple key matches a tuple key.
         return hash(self._data)
 
@@ -190,6 +222,7 @@ class FrozenSet[T](_Frozen, AbstractSet[T]):
 
     @classmethod
     def _new(cls, items: frozenset[T], h: bytes) -> FrozenSet[T]:
+        """Create a set node holding ``items``, with content hash ``h``."""
         obj = object.__new__(cls)
         _set_set_data(obj, items)
         _set_set_hash(obj, h)
@@ -197,18 +230,23 @@ class FrozenSet[T](_Frozen, AbstractSet[T]):
 
     @classmethod
     def _from_iterable[S](cls, it: Iterable[S]) -> frozenset[S]:
+        """Return a built-in ``frozenset``: the set operators of ``AbstractSet`` build their result with it."""
         return frozenset(it)
 
     def __iter__(self) -> Iterator[T]:
+        """Iterate over the items, in no defined order."""
         return iter(self._data)
 
     def __len__(self) -> int:
+        """Return the number of items."""
         return len(self._data)
 
     def __contains__(self, item: object) -> bool:
+        """Return whether ``item`` is in the set."""
         return item in self._data
 
     def __eq__(self, other: object) -> bool:
+        """Compare by content hash with another ``FrozenSet``, and by content with a ``set`` or ``frozenset``."""
         if isinstance(other, FrozenSet):
             return self._pf_hash == other._pf_hash
         if isinstance(other, (set, frozenset)):
@@ -216,10 +254,12 @@ class FrozenSet[T](_Frozen, AbstractSet[T]):
         return NotImplemented
 
     def __hash__(self) -> int:
+        """Return the hash of the items as a built-in frozenset."""
         # Same hash as the built-in frozenset.
         return hash(self._data)
 
     def __repr__(self) -> str:
+        """Return ``FrozenSet({...})``."""
         return f"FrozenSet({set(self._data)!r})"
 
 
@@ -248,6 +288,7 @@ class KMBranch(_Frozen):
 
     @classmethod
     def _new(cls, bitmap: int, children: tuple[KMChild, ...], h: bytes) -> KMBranch:
+        """Create a key map branch with ``bitmap`` and ``children``, with content hash ``h``."""
         obj = object.__new__(cls)
         _set_branch_bitmap(obj, bitmap)
         _set_branch_children(obj, children)
@@ -255,6 +296,7 @@ class KMBranch(_Frozen):
         return obj
 
     def __eq__(self, other: object) -> bool:
+        """Compare by content hash with another ``KMBranch``."""
         if isinstance(other, KMBranch):
             return self._pf_hash == other._pf_hash
         return NotImplemented
@@ -262,6 +304,7 @@ class KMBranch(_Frozen):
     __hash__ = _Frozen.__hash__
 
     def __repr__(self) -> str:
+        """Return ``KMBranch(<hex hash>)``."""
         return f"KMBranch({self._pf_hash.hex()})"
 
 
@@ -276,12 +319,14 @@ class KMCollision(_Frozen):
 
     @classmethod
     def _new(cls, entries: tuple[tuple[str, bytes], ...], h: bytes) -> KMCollision:
+        """Create a key map collision node with ``entries``, with content hash ``h``."""
         obj = object.__new__(cls)
         _set_collision_entries(obj, entries)
         _set_collision_hash(obj, h)
         return obj
 
     def __eq__(self, other: object) -> bool:
+        """Compare by content hash with another ``KMCollision``."""
         if isinstance(other, KMCollision):
             return self._pf_hash == other._pf_hash
         return NotImplemented
@@ -289,6 +334,7 @@ class KMCollision(_Frozen):
     __hash__ = _Frozen.__hash__
 
     def __repr__(self) -> str:
+        """Return ``KMCollision(<hex hash>)``."""
         return f"KMCollision({self._pf_hash.hex()})"
 
 
