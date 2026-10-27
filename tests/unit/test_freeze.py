@@ -1,6 +1,7 @@
 """Scenarios of specs/frozen-values/spec.md."""
 
 from dataclasses import dataclass as std_dataclass
+from enum import Enum
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -10,15 +11,18 @@ from permafrost import (
     FrozenList,
     FrozenTuple,
     UnsupportedTypeError,
+    codec,
     equal,
     freeze,
     hash_of,
+    register_class,
     register_type,
     registry,
 )
+from permafrost.types import build, children, encode_node
 
 from .. import models
-from ..models import Device, Interface, Site
+from ..models import Device, Interface, Item, Level, Perm, Site, State
 
 
 def test_store_a_nested_value():
@@ -179,3 +183,63 @@ def test_pydantic_model_extra_fields_are_rejected():
 
     with pytest.raises(UnsupportedTypeError, match="extra"):
         freeze(Extra(a=1, b=2))
+
+
+def test_store_a_member_of_a_str_enum_without_registration():
+    frozen = freeze({"devices": [{"state": State.PRESENT}]})
+    member = frozen["devices"][0]["state"]
+    assert member is State.PRESENT
+    assert freeze(State.ABSENT) is State.ABSENT
+
+
+def test_enum_member_as_a_model_field():
+    frozen = freeze(Item(name="a", state=State.ABSENT))
+    assert frozen.state is State.ABSENT
+    assert children(frozen) == []
+
+
+def test_enum_member_as_a_dictionary_key():
+    frozen = freeze({State.PRESENT: 1})
+    (key,) = frozen.keys()
+    assert type(key) is State and key is State.PRESENT
+    assert children(frozen) == []
+
+
+def test_integer_enum_member():
+    frozen = freeze([Level.HIGH, Perm.R | Perm.W])
+    assert type(frozen[0]) is Level and frozen[0] is Level.HIGH
+    assert type(frozen[1]) is Perm and frozen[1] == Perm.R | Perm.W
+    assert children(frozen) == []
+
+
+def test_reject_a_member_of_an_enum_that_does_not_subclass_str_or_int():
+    class Shape(Enum):
+        ROUND = "round"
+
+    with pytest.raises(UnsupportedTypeError, match="Shape"):
+        freeze({"shape": Shape.ROUND})
+
+
+def test_enum_class_registered_under_another_name():
+    class Mode(str, Enum):
+        ON = "on"
+
+    register_class(Mode, "tests.Mode")
+    payload = codec.unpack(encode_node(freeze([Mode.ON])))
+    items = payload[1]
+    assert isinstance(items, list) and isinstance(items[0], codec.EnumValue)
+    assert items[0].name == "tests.Mode"
+    rebuilt = build(b"x" * 16, payload, lambda h: None)
+    assert isinstance(rebuilt, FrozenList) and rebuilt[0] is Mode.ON
+
+
+def test_enum_class_with_a_registered_type_handler():
+    class Flavor(str, Enum):
+        SWEET = "sweet"
+
+    register_type(Flavor, name="tests.Flavor", encode=lambda f: f.value, decode=Flavor)
+    frozen = freeze({"f": Flavor.SWEET})
+    member = frozen["f"]
+    assert member is Flavor.SWEET
+    assert children(frozen) == [member]
+    assert hash_of(member) == codec.digest(codec.encode_handler("tests.Flavor", "sweet", lambda n: b""))

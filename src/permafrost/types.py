@@ -9,6 +9,7 @@ import weakref
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Protocol, TypeGuard, cast, overload, runtime_checkable
 
 from pydantic import BaseModel
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
     from _typeshed import DataclassInstance
 
 from . import codec, registry
-from .codec import SCALAR_TYPES, Ref, Scalar
+from .codec import EnumValue, Ref, Scalar, is_scalar_type
 from .errors import UnsupportedTypeError
 from .nodes import (
     COLLECTION_TYPES,
@@ -67,7 +68,7 @@ def is_node(value: object) -> bool:
 
 def is_scalar(value: object) -> TypeGuard[Scalar]:
     """Return whether ``value`` is a scalar, which is stored inside its parent node rather than as a node."""
-    return type(value) in SCALAR_TYPES
+    return is_scalar_type(type(value))
 
 
 # ---------------------------------------------------------------------------
@@ -144,18 +145,30 @@ def _model_info(cls: type[object], path: str | None = None) -> _ModelInfo | None
     return info
 
 
+def _is_enum_scalar_class(cls: type[object]) -> bool:
+    """Return whether ``cls`` is an enum class that subclasses ``str`` or ``int``, whatever handler it has."""
+    return issubclass(cls, Enum) and issubclass(cls, (str, int))
+
+
 def register_class[M](cls: type[M], path: str | None = None) -> None:
-    """Register a model class, optionally under a name of your choice.
+    """Register a model class or an enum class, optionally under a name of your choice.
 
     Permafrost writes the name in the encoding of each instance and uses it to
     find the class when it rebuilds an instance from the external cache. By
     default the name is ``module:qualname`` and the class is imported by that
     name. Register a class under another name when it cannot be imported, for
     example a class defined inside a function. Register it before storing any
-    instance.
+    instance. An enum class must subclass ``str`` or ``int``.
     """
+    if _is_enum_scalar_class(cls):
+        path = path or f"{cls.__module__}:{cls.__qualname__}"
+        codec.register_enum(cls, path)
+        _classes_by_path[path] = cls
+        return
     if _model_info(cls, path) is None:
-        raise UnsupportedTypeError(f"{cls.__qualname__} is not a dataclass or a Pydantic model")
+        raise UnsupportedTypeError(
+            f"{cls.__qualname__} is not a dataclass, a Pydantic model or an enum class that subclasses str or int"
+        )
 
 
 def _class_for_path(path: str) -> type[object]:
@@ -169,8 +182,26 @@ def _class_for_path(path: str) -> type[object]:
         if not isinstance(obj, type):
             raise ImportError(f"{path} is not a class")
         cls = obj
-        _model_info(cls)
+        if codec.enum_name(cls) is None:
+            _model_info(cls)
     return cls
+
+
+def _enum_member(item: EnumValue) -> object:
+    """Return the enum member that ``item`` names, importing its class by name if needed.
+
+    Raises ``ValueError`` when the class is not an enum class of scalars or the
+    value is not one of its members.
+    """
+    cls = _class_for_path(item.name)
+    if codec.enum_name(cls) is None or not issubclass(cls, Enum):
+        raise _malformed(f"{item.name} is not an enum class that subclasses str or int")
+    return cls(item.value)
+
+
+def _scalar(item: object) -> object:
+    """Return the decoded scalar ``item``, with the enum member for an ``EnumValue``."""
+    return _enum_member(item) if type(item) is EnumValue else item
 
 
 def _build_model(info: _ModelInfo, values: tuple[object, ...], h: bytes) -> object:
@@ -263,6 +294,8 @@ def register_type[T, E](
 ) -> TypeHandler[T, E]:
     """Register a type handler for ``cls``. ``name`` identifies the type in stored data."""
     handler = TypeHandler(cls, name, encode, decode)
+    # A handler takes priority over storing enum members as scalars.
+    codec.exclude_enum(cls)
     # The registries hold handlers of every type, and a handler is only called
     # with instances of its own type or with the frozen form of its own encoding.
     stored = cast(TypeHandler[object, object], handler)
@@ -377,13 +410,14 @@ def freeze(value: object) -> object: ...
 def freeze(value: object) -> object:
     """Return the read-only form of a value.
 
-    Scalars are returned as they are. Dictionaries, lists, tuples and sets
+    Scalars, including members of enum classes that subclass ``str`` or ``int``,
+    are returned as they are. Dictionaries, lists, tuples and sets
     become ``FrozenDict``, ``FrozenList``, ``FrozenTuple`` and ``FrozenSet``.
     Models are returned as instances of their own class whose fields hold
     read-only values. Values that are already read-only are returned as they are.
     """
     t = type(value)
-    if t in SCALAR_TYPES or t in _BUILTIN_NODE_TYPES:
+    if is_scalar_type(t) or t in _BUILTIN_NODE_TYPES:
         return value
     if type(value) is dict:
         return _freeze_mapping(value)
@@ -431,21 +465,21 @@ def equal(a: object, b: object) -> bool:
 def children(node: object) -> list[object]:
     """Return the child nodes of a node. Scalars are not returned."""
     if isinstance(node, FrozenDict):
-        return [x for kv in node._data.items() for x in kv if type(x) not in SCALAR_TYPES]
+        return [x for kv in node._data.items() for x in kv if not is_scalar_type(type(x))]
     if isinstance(node, (FrozenList, FrozenTuple, FrozenSet)):
-        return [x for x in node._data if type(x) not in SCALAR_TYPES]
+        return [x for x in node._data if not is_scalar_type(type(x))]
     if isinstance(node, KMBranch):
         return [c for c in node.children if not isinstance(c, tuple)]
     t = type(node)
-    if t is KMCollision or t in SCALAR_TYPES:
+    if t is KMCollision or is_scalar_type(t):
         return []
     handler = _handlers_by_type.get(t)
     if handler is not None:
         inner = _handler_inner(handler, node)
-        return [] if type(inner) in SCALAR_TYPES else [inner]
+        return [] if is_scalar_type(type(inner)) else [inner]
     info = _model_info(t)
     if info is not None:
-        return [v for v in model_values(info, node) if type(v) not in SCALAR_TYPES]
+        return [v for v in model_values(info, node) if not is_scalar_type(type(v))]
     raise TypeError(f"{t.__qualname__} object is not a Permafrost node")
 
 
@@ -490,7 +524,7 @@ def walk(root: object) -> Iterator[object]:
 
 def _scalars_size(items: Iterable[object]) -> int:
     """Return the memory, in bytes, of the scalars among ``items``."""
-    return sum(sys.getsizeof(x) for x in items if type(x) in SCALAR_TYPES)
+    return sum(sys.getsizeof(x) for x in items if is_scalar_type(type(x)))
 
 
 def estimate_size(root: object) -> int:
@@ -568,8 +602,8 @@ def build(h: bytes, payload: Sequence[object], resolve: Callable[[bytes], object
     """
 
     def r(item: object) -> object:
-        """Return the child node for a ``Ref``, or ``item`` itself when it is a scalar."""
-        return resolve(item.hash) if type(item) is Ref else item
+        """Return the child node for a ``Ref``, or the scalar ``item`` with enum members rebuilt."""
+        return resolve(item.hash) if type(item) is Ref else _scalar(item)
 
     def km_child(item: object) -> KMChild:
         """Return a key map child: an entry ``(key, value_hash)``, or the branch or collision node of a ``Ref``."""
@@ -583,7 +617,7 @@ def build(h: bytes, payload: Sequence[object], resolve: Callable[[bytes], object
 
     tag = _as_int(_field(payload, 0))
     if tag == codec.TAG_SCALAR:
-        return _field(payload, 1)
+        return _scalar(_field(payload, 1))
     node: object
     if tag == codec.TAG_DICT:
         node = FrozenDict._new({r(k): r(v) for k, v in map(_as_pair, _as_list(_field(payload, 1)))}, h)

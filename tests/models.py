@@ -2,12 +2,39 @@
 
 from __future__ import annotations
 
+from enum import Enum, IntEnum, IntFlag, StrEnum
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
 
 from permafrost import FrozenModel
 
 POST_INIT_CALLS = []
+
+
+class State(str, Enum):
+    PRESENT = "present"
+    ABSENT = "absent"
+
+
+class OtherState(str, Enum):
+    PRESENT = "present"
+
+
+class Color(StrEnum):
+    RED = "red"
+
+
+class Level(IntEnum):
+    LOW = 1
+    HIGH = 2
+    HUGE = 2**70
+
+
+class Perm(IntFlag):
+    R = 4
+    W = 2
+    X = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,3 +59,10 @@ class Site(BaseModel):
 
     name: str
     devices: list[str] = []
+
+
+class Item(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    state: State = State.PRESENT

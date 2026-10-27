@@ -64,13 +64,13 @@ assert hash_of([1, 2]) != hash_of((1, 2))
 
 ### Supported types
 
-- Scalars: `str`, `int`, `float`, `bool`, `None`, `bytes`, `datetime.date` and `datetime.datetime`. They are stored inside their parent node.
+- Scalars: `str`, `int`, `float`, `bool`, `None`, `bytes`, `datetime.date` and `datetime.datetime`, and members of enum classes that subclass `str` or `int`, such as `StrEnum`, `IntEnum` and `IntFlag`. They are stored inside their parent node.
 - `dict`, `list`, `tuple`, `set` and `frozenset`.
 - Pydantic dataclasses that inherit from `FrozenModel`, and other frozen dataclasses that support weak references.
 - Pydantic models (`BaseModel`) with `frozen=True`. Extra fields are not supported.
 - Other types, through a type handler.
 
-`1`, `1.0` and `True` are equal in Python but have different hashes in Permafrost, because their encodings differ.
+`1`, `1.0` and `True` are equal in Python but have different hashes in Permafrost, because their encodings differ. For the same reason, an enum member and its plain value have different hashes, and so do members of two enum classes with the same value.
 
 ### Models
 
@@ -102,9 +102,40 @@ Permafrost freezes the fields of a model too. A field declared as `list[str]` ho
 
 To rebuild a model from the external cache, Permafrost imports its class by `module:qualname`. Register classes that cannot be imported that way, such as classes defined inside a function, with `register_class(cls, "a-name")` before you store any instance.
 
+### Enum members
+
+A member of an enum class that subclasses `str` or `int` is a scalar: Permafrost stores it inside its parent node, as a dictionary key or value, a collection item or a model field, without any registration. The encoding names the enum class and holds the value of the member, so reading a value back returns the same member, not its plain value. To rebuild a member from the external cache, Permafrost imports its class by `module:qualname`, and `register_class()` accepts enum classes that cannot be imported that way. Members of other enum classes need a type handler.
+
+```python
+from enum import Enum
+
+from pydantic import BaseModel, ConfigDict
+
+from permafrost import freeze, hash_of
+
+
+class State(str, Enum):
+    PRESENT = "present"
+    ABSENT = "absent"
+
+
+class Node(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    state: State
+
+
+frozen = freeze({State.PRESENT: [Node(name="r1", state=State.PRESENT)]})
+assert frozen[State.PRESENT][0].state is State.PRESENT
+assert hash_of(State.PRESENT) != hash_of("present")
+```
+
 ### Type handlers
 
 `register_type()` tells Permafrost how to store a type it does not support on its own. `encode` returns a supported value with the content of the object. `decode` receives the frozen form of that value and returns an instance. The instance must be read-only and support weak references: Permafrost does not check that it is read-only.
+
+A type handler registered for an enum class that subclasses `str` or `int` takes priority: Permafrost stores each member through the handler, as a node of its own, and the hashes of values already stored this way do not change. Without the handler, the members are stored as scalars and get new hashes.
 
 ```python
 from permafrost import freeze, hash_of, register_type

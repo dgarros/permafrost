@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .codec import SCALAR_TYPES
+from .codec import is_scalar_type
 from .nodes import FrozenDict, FrozenList, FrozenSet, FrozenTuple
 from .ops import Step
 from .types import freeze, model_info_of, model_values, node_hash
@@ -49,7 +49,7 @@ def _same(a: object, b: object) -> bool:
     ta = type(a)
     if ta is not type(b):
         return False
-    if ta in SCALAR_TYPES:
+    if is_scalar_type(ta):
         return a == b
     return node_hash(a) == node_hash(b)
 
@@ -61,7 +61,7 @@ def _diff(a: object, b: object, path: tuple[Step, ...], out: list[DiffEntry]) ->
     """
     if _same(a, b):
         return
-    if type(a) is not type(b) or type(a) in SCALAR_TYPES:
+    if type(a) is not type(b) or is_scalar_type(type(a)):
         out.append(DiffEntry(path, CHANGED, a, b))
         return
     if isinstance(a, FrozenDict) and isinstance(b, FrozenDict):

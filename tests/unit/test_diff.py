@@ -7,7 +7,7 @@ from permafrost import DiffEntry, diff, equal, freeze, set_in
 # permafrost.diff is the function, so get the module from importlib.
 diff_module = importlib.import_module("permafrost.diff")
 
-from ..models import Device, Interface
+from ..models import Device, Interface, Item, State
 
 
 def test_two_equal_values_built_separately():
@@ -84,3 +84,15 @@ def test_one_change_in_a_large_value(monkeypatch):
     inside_unchanged = [p for p in calls if len(p) > 1 and p[0] != "subtree-500"]
     assert inside_unchanged == []
     assert len(calls) == 1 + 1000 + 2 + 20
+
+
+def test_changed_enum_member_in_a_model_field():
+    a = Item(name="a", state=State.PRESENT)
+    b = Item(name="a", state=State.ABSENT)
+    assert diff(a, b) == [DiffEntry(("state",), "changed", State.PRESENT, State.ABSENT)]
+
+
+def test_enum_member_replaced_by_its_plain_value():
+    entries = diff({"s": State.PRESENT}, {"s": "present"})
+    assert entries == [DiffEntry(("s",), "changed", State.PRESENT, "present")]
+    assert type(entries[0].old) is State and type(entries[0].new) is str
