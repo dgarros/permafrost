@@ -32,7 +32,7 @@ from permafrost import (
     set_in,
 )
 
-from ..models import Device, Interface, Site
+from ..models import Device, Interface, Item, Level, Site, State
 
 
 class Prefix:
@@ -78,6 +78,16 @@ def _freeze_scalars(number: int, text: str, data: bytes, day: date) -> None:
 
 def test_freeze_a_scalar() -> None:
     _freeze_scalars(1, "a", b"a", date(2026, 10, 25))
+
+
+def _freeze_enum_members(state: State, level: Level) -> None:
+    assert_type(freeze(state), State)
+    assert_type(freeze(level), Level)
+    assert_type(freeze(Item(name="a", state=state)).state, State)
+
+
+def test_freeze_an_enum_member() -> None:
+    _freeze_enum_members(State.PRESENT, Level.HIGH)
 
 
 # Models keep their class

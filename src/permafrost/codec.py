@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Iterable
 from datetime import date, datetime
+from enum import Enum
 
 import msgpack
 
@@ -32,6 +33,7 @@ EXT_REF = 1
 EXT_DATE = 2
 EXT_DATETIME = 3
 EXT_BIGINT = 4
+EXT_ENUM = 5
 
 HASH_SIZE = 16
 
@@ -42,6 +44,47 @@ _INT_MAX = 2**64 - 1
 type Scalar = str | int | float | bool | bytes | date | datetime | None
 
 SCALAR_TYPES: frozenset[type] = frozenset({type(None), bool, int, float, str, bytes, date, datetime})
+
+# Name written in the encoding of each member, by enum class, or None for a
+# class whose members are not scalars. Filled the first time a class is seen.
+_enum_names: dict[type, str | None] = {}
+
+
+def enum_name(t: type) -> str | None:
+    """Return the name of ``t`` in the encoding when its members are scalars, or ``None``.
+
+    The members of an enum class that subclasses ``str`` or ``int`` are scalars,
+    named ``module:qualname`` unless the class was registered under another name.
+    """
+    try:
+        return _enum_names[t]
+    except KeyError:
+        pass
+    name = None
+    if issubclass(t, Enum) and issubclass(t, (str, int)):
+        name = f"{t.__module__}:{t.__qualname__}"
+    _enum_names[t] = name
+    return name
+
+
+def is_enum_scalar_type(t: type) -> bool:
+    """Return whether ``t`` is an enum class whose members are scalars."""
+    return enum_name(t) is not None
+
+
+def is_scalar_type(t: type) -> bool:
+    """Return whether values of type ``t`` are scalars: a built-in scalar type or an enum class of scalars."""
+    return t in SCALAR_TYPES or enum_name(t) is not None
+
+
+def register_enum(t: type, name: str) -> None:
+    """Write the members of the enum class ``t`` under ``name`` in the encoding."""
+    _enum_names[t] = name
+
+
+def exclude_enum(t: type) -> None:
+    """Stop treating the members of ``t`` as scalars, because a type handler stores them."""
+    _enum_names[t] = None
 
 
 class Ref:
@@ -56,6 +99,21 @@ class Ref:
     def __repr__(self) -> str:
         """Return ``Ref(<hex hash>)``."""
         return f"Ref({self.hash.hex()})"
+
+
+class EnumValue:
+    """An enum member in decoded content: the name of its class and its value."""
+
+    __slots__ = ("name", "value")
+
+    def __init__(self, name: str, value: object) -> None:
+        """Hold the member with value ``value`` of the enum class named ``name``."""
+        self.name = name
+        self.value = value
+
+    def __repr__(self) -> str:
+        """Return ``EnumValue(<name>, <value>)``."""
+        return f"EnumValue({self.name!r}, {self.value!r})"
 
 
 # What the encoder passes to msgpack: scalars, extension values and nested arrays.
@@ -92,6 +150,9 @@ def encode_item(item: object, hash_of_node: HashOfNode) -> Packable:
         return msgpack.ExtType(EXT_DATETIME, item.isoformat().encode())
     if type(item) is date:
         return msgpack.ExtType(EXT_DATE, item.isoformat().encode())
+    name = enum_name(type(item))
+    if name is not None and isinstance(item, Enum):
+        return msgpack.ExtType(EXT_ENUM, _pack([name, encode_item(item.value, _no_children)]))
     return msgpack.ExtType(EXT_REF, hash_of_node(item))
 
 
@@ -152,7 +213,7 @@ def encode_km_collision(entries: Iterable[tuple[str, bytes]]) -> bytes:
 
 
 def _ext_hook(code: int, data: bytes) -> object:
-    """Decode a msgpack extension value: a child reference, a date, a datetime or a large integer."""
+    """Decode a msgpack extension value: a child reference, a date, a datetime, a large integer or an enum member."""
     if code == EXT_REF:
         return Ref(data)
     if code == EXT_DATETIME:
@@ -161,6 +222,11 @@ def _ext_hook(code: int, data: bytes) -> object:
         return date.fromisoformat(data.decode())
     if code == EXT_BIGINT:
         return int(data.decode())
+    if code == EXT_ENUM:
+        content = msgpack.unpackb(data, raw=False, ext_hook=_ext_hook)
+        if type(content) is not list or len(content) != 2 or type(content[0]) is not str:
+            raise ValueError("the data is not the encoding of an enum member")
+        return EnumValue(content[0], content[1])
     return msgpack.ExtType(code, data)
 
 

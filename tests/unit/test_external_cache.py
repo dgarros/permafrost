@@ -1,9 +1,13 @@
 """Scenarios of specs/external-cache/spec.md that do not name Redis."""
 
+import msgpack
 import pytest
 
-from permafrost import Backend, MemoryBackend, Store, freeze, hash_of, registry
+from permafrost import Backend, MemoryBackend, Store, codec, freeze, hash_of, registry
 from permafrost.types import walk
+
+from ..models import State
+from ..process import Process
 
 
 def _forget(store, collect):
@@ -212,3 +216,48 @@ async def test_loaded_value_rewrites_a_lost_node_still_held_in_memory(setup, col
     # Other processes need both entries: the loaded value is written with every node.
     assert root in backend.nodes
     assert hash_of(child) in backend.nodes
+
+
+async def test_read_an_enum_member_from_the_external_cache():
+    backend = MemoryBackend()
+    with Process():
+        writer = Store(backend)
+        await writer.create_dimension("main")
+        await writer.set("main", "k", {"s": State.PRESENT, State.ABSENT: [1]})
+    with Process():
+        reader = Store(backend)
+        value = await reader.get("main", "k")
+    assert value["s"] is State.PRESENT
+    assert type(value["s"]) is State
+    assert {type(k) for k in value} == {str, State}
+
+
+def _dict_with_enum(name, value):
+    """Return the encoding of a dictionary node whose key ``"s"`` holds an enum member named ``name``."""
+    member = msgpack.ExtType(codec.EXT_ENUM, msgpack.packb([name, value], use_bin_type=True))
+    return msgpack.packb([codec.TAG_DICT, [["s", member]]], use_bin_type=True)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        pytest.param("tests.missing:Nope", "present", id="unknown-module"),
+        pytest.param("tests.models:Nope", "present", id="unknown-class"),
+        pytest.param("tests.models:Item", "present", id="not-an-enum"),
+        pytest.param("tests.models:State", "gone", id="not-a-member"),
+    ],
+)
+async def test_enum_class_cannot_be_found_when_rebuilding(setup, collect, name, value):
+    backend, store = setup
+    calls = []
+
+    async def loader(d, k):
+        calls.append(k)
+        return {"s": State.PRESENT}
+
+    store.loader = loader
+    await store.set("main", "k", {"s": State.PRESENT})
+    _forget(store, collect)
+    backend.nodes[hash_of({"s": State.PRESENT})] = _dict_with_enum(name, value)
+    assert await store.get("main", "k") == {"s": State.PRESENT}
+    assert calls == ["k"]

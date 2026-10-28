@@ -133,7 +133,7 @@ Values and key maps are both trees of read-only nodes, stored once in the regist
 
 The library stores values made of any combination of:
 
-- scalars: strings, integers, floats, booleans, `None`, bytes, dates
+- scalars: strings, integers, floats, booleans, `None`, bytes, dates, and members of enum classes that subclass `str` or `int`
 - dictionaries, lists, tuples and sets
 - Pydantic dataclasses and Pydantic models
 - other Python objects that a user registers with a type handler, which tells Permafrost how to hash, freeze and store that type
